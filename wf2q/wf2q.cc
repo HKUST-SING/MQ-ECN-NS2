@@ -1,20 +1,27 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <float.h>
+#include "flags.h"
 #include "wf2q.h"
 
-static class WF2QClass : public TclClass {
-public:
-	WF2QClass() : TclClass("Queue/WF2Q") {}
-	TclObject* create(int argc, const char*const* argv) {
-		return (new WF2Q);
-	}
+#define max(arg1,arg2) (arg1>arg2 ? arg1 : arg2)
+
+static class WF2QClass : public TclClass 
+{
+	public:
+		WF2QClass() : TclClass("Queue/WF2Q") {}
+		TclObject* create(int argc, const char*const* argv) 
+		{
+			return (new WF2Q);
+		}
 } class_wf2q;
 
 WF2Q::WF2Q()
 {
 	/* bind variables */
 	bind("queue_num_", &queue_num_);
-	bind_bool("port_ecn_marking_", &port_ecn_marking_);
+	bind("port_ecn_marking_", &port_ecn_marking_);
 	bind("mean_pktsize_", &mean_pktsize_);
 	bind("port_low_thresh_", &port_low_thresh_);
 	bind("port_high_thresh_", &port_high_thresh_);
@@ -29,8 +36,8 @@ WF2Q::WF2Q()
 	for(int i=0;i<queue_num_;i++)
 	{
 		qs[i].q_=new PacketQueue;
-		/* By default, weight is 1 for each queue */
-		qs[i].weight=1.0;
+		/* By default, weight is 1000 for each queue given that MTU is 1500 bytes */
+		qs[i].weight=1000.0;
 		qs[i].S=0.0;
 		qs[i].F=0.0;
 	}
@@ -59,7 +66,7 @@ int WF2Q::TotalByteLength()
 /* return ECN marking threshold for weight '1' */
 int WF2Q::WeightedThresh()
 {
-	int bytes=0;
+	double bytes=0;
 	double weights=0.0;
 	
 	for(int i=0;i<queue_num_;i++)
@@ -118,7 +125,7 @@ int WF2Q::command(int argc, const char*const* argv)
 }
 
 /* Receive a new packet */
-void WF2Q::enque(Packet *pkt)
+void WF2Q::enque(Packet *p)
 {
 	hdr_ip *iph=hdr_ip::access(p);
 	int prio=iph->prio();
@@ -142,18 +149,17 @@ void WF2Q::enque(Packet *pkt)
 		qs[prio].S=max(V, qs[prio].F);
 		if(qs[prio].weight>0)
 		{
-			qs[prio].F=qs[prio].S+((double)pktSize/qs[prio].weight);
+			qs[prio].F=qs[prio].S+pktSize/qs[prio].weight;
 		}
 		/* In theory, weight should never be zero or negative */
 		else
 		{
 			fprintf (stderr,"illegal weight value\n");
-			/* Simply assume weight=1 */
-			qs[prio].F=qs[prio].S+pktSize;
+			exit(1);
 		}
 		
 		/* update system virutal clock */
-		double minS = qs[prio].S;
+		long double minS = qs[prio].S;
 		for(int i=0;i<queue_num_;i++)
 		{
 			if(qs[i].q_->length()>0&&minS>qs[i].S)
@@ -163,9 +169,9 @@ void WF2Q::enque(Packet *pkt)
 	}
 	
 	/* Per-queue ECN marking */
-	if(!port_ecn_marking_)
+	if(port_ecn_marking_==0)
 	{
-		if(qs[prio].q_->byteLength()+pktSize>=queue_thresh_*mean_pktsize_)
+		if(qs[prio].q_->byteLength()+pktSize>queue_thresh_*mean_pktsize_)
 			/*If this packet is ECN-capable (ECT) */
 			if(hf->ect()) 
 				hf->ce() = 1;
@@ -173,18 +179,72 @@ void WF2Q::enque(Packet *pkt)
 	/* Per-port ECN marking */
 	else
 	{
-		if(TotalByteLength()+pktSize>queue_thresh_*mean_pktsize_)
+		/* Total buffer occupation is larger than low ECN marking threshold */ 
+		if(TotalByteLength()+pktSize>port_low_thresh_*mean_pktsize_)
 		{
-			if (hf->ect())
-				hf->ce() = 1;
+			/* Queue buffer occupation is larger than weighted ECN marking threshold for this queue
+			 * or total buffer occupation is larger than high ECN marking threshold */ 
+			if(qs[prio].q_->byteLength()+pktSize>WeightedThresh()*qs[prio].weight||
+				TotalByteLength()+pktSize>port_high_thresh_*mean_pktsize_)
+				if (hf->ect())
+					hf->ce() = 1;
 		}
 	}
 
-	qs[prio].q_.enque(pkt); 		
+	qs[prio].q_->enque(p); 		
 }
 
 Packet *WF2Q::deque(void)
 {
+	Packet *pkt=NULL, *nextPkt=NULL;
+	int i, pktSize;
+	long double minF=LDBL_MAX ;
+	int queue=-1;
+	double weight=0.0;
 	
+	/* look for the candidate queue with the earliest finish time */
+	for(i=0; i<queue_num_; i++)
+	{
+		if (qs[i].q_->length()==0)
+			continue;
+		if (qs[i].S<=V && qs[i].F<minF)
+		{
+			queue=i;
+			minF=qs[i].F;
+		}
+	}
+	
+	if (queue==-1)
+		return NULL;
+	
+	pkt=qs[queue].q_->deque();
+	/* Set the start and the finish times of the remaining packets in the queue */
+	nextPkt=qs[queue].q_->head();
+	if (nextPkt!=NULL) 
+	{
+		qs[queue].S=qs[queue].F;
+		if(qs[queue].weight>0)
+		{
+			qs[queue].S=qs[queue].F;
+			qs[queue].F=qs[queue].S+(hdr_cmn::access(nextPkt)->size())/qs[queue].weight;
+		}
+		else
+		{
+			fprintf (stderr,"illegal weight value\n");
+			exit(1);
+		}
+	}
+	
+	/* update the virtual clock */
+	long double minS = qs[queue].S;
+	for(int i=0;i<queue_num_;i++)
+	{
+		weight+=qs[i].weight;
+		if(qs[i].q_->length()>0&&minS>qs[i].S)
+			minS=qs[i].S;
+	}
+	if(weight>0)
+		V=max(minS, V+pktSize/weight);
+	return pkt;
 }
 
