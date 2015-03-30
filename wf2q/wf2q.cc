@@ -95,7 +95,7 @@ int WF2Q::command(int argc, const char*const* argv)
 {
 	if (argc == 4) 
 	{
-		if (strcmp(argv[1], "set-weight\n") == 0) 
+		if (strcmp(argv[1], "set-weight\0") == 0) 
 		{
 			int queue_id=atoi(argv[2]);
 			if(queue_id<queue_num_)
@@ -137,11 +137,15 @@ void WF2Q::enque(Packet *p)
 	if(TotalByteLength()+pktSize>qlimBytes)
 	{
 		drop(p);
+		printf("Packet drop\n");
 		return;
 	}
 	
 	if(prio>=queue_num_)
 		prio=queue_num_-1;
+	
+	//For debug
+	//printf ("enque to %d\n", prio);
 	
 	/* If queue for the flow is empty, calculate start and finish times */
 	if(qs[prio].q_->length()==0)
@@ -171,23 +175,26 @@ void WF2Q::enque(Packet *p)
 	/* Per-queue ECN marking */
 	if(port_ecn_marking_==0)
 	{
-		if(qs[prio].q_->byteLength()+pktSize>queue_thresh_*mean_pktsize_)
-			/*If this packet is ECN-capable (ECT) */
+		if(qs[prio].q_->byteLength()+pktSize>=queue_thresh_*mean_pktsize_)
+		{	/*If this packet is ECN-capable (ECT) */
 			if(hf->ect()) 
 				hf->ce() = 1;
+		}
 	}
 	/* Per-port ECN marking */
 	else
 	{
 		/* Total buffer occupation is larger than low ECN marking threshold */ 
-		if(TotalByteLength()+pktSize>port_low_thresh_*mean_pktsize_)
+		if(TotalByteLength()+pktSize>=port_low_thresh_*mean_pktsize_)
 		{
 			/* Queue buffer occupation is larger than weighted ECN marking threshold for this queue
 			 * or total buffer occupation is larger than high ECN marking threshold */ 
-			if(qs[prio].q_->byteLength()+pktSize>WeightedThresh()*qs[prio].weight||
-				TotalByteLength()+pktSize>port_high_thresh_*mean_pktsize_)
+			if(qs[prio].q_->byteLength()+pktSize>=WeightedThresh()*qs[prio].weight||
+				TotalByteLength()+pktSize>=port_high_thresh_*mean_pktsize_)
+			{	
 				if (hf->ect())
 					hf->ce() = 1;
+			}
 		}
 	}
 
@@ -217,7 +224,11 @@ Packet *WF2Q::deque(void)
 	if (queue==-1)
 		return NULL;
 	
+	//For debug
+	//printf ("deque from %d\n", queue);
+	
 	pkt=qs[queue].q_->deque();
+	
 	/* Set the start and the finish times of the remaining packets in the queue */
 	nextPkt=qs[queue].q_->head();
 	if (nextPkt!=NULL) 
