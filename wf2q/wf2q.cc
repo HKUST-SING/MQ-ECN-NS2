@@ -22,6 +22,7 @@ WF2Q::WF2Q()
 	/* bind variables */
 	bind("queue_num_", &queue_num_);
 	bind("port_ecn_marking_", &port_ecn_marking_);
+	bind("dequeue_ecn_marking_", &dequeue_ecn_marking_);
 	bind("mean_pktsize_", &mean_pktsize_);
 	bind("port_low_thresh_", &port_low_thresh_);
 	bind("port_high_thresh_", &port_high_thresh_);
@@ -172,28 +173,31 @@ void WF2Q::enque(Packet *p)
 		V=max(minS, V);
 	}
 	
-	/* Per-queue ECN marking */
-	if(port_ecn_marking_==0)
+	/* Enqueue ECN marking */
+	if(dequeue_ecn_marking_==0)
 	{
-		if(qs[prio].q_->byteLength()+pktSize>=queue_thresh_*mean_pktsize_)
-		{	/*If this packet is ECN-capable (ECT) */
-			if(hf->ect()) 
-				hf->ce() = 1;
-		}
-	}
-	/* Per-port ECN marking */
-	else
-	{
-		/* Total buffer occupation is larger than low ECN marking threshold */ 
-		if(TotalByteLength()+pktSize>=port_low_thresh_*mean_pktsize_)
+		/* Per-queue ECN marking */
+		if(port_ecn_marking_==0)
 		{
-			/* Queue buffer occupation is larger than weighted ECN marking threshold for this queue
-			 * or total buffer occupation is larger than high ECN marking threshold */ 
-			if(qs[prio].q_->byteLength()+pktSize>=WeightedThresh()*qs[prio].weight||
-				TotalByteLength()+pktSize>=port_high_thresh_*mean_pktsize_)
-			{	
-				if (hf->ect())
+			if(qs[prio].q_->byteLength()+pktSize>=queue_thresh_*mean_pktsize_)
+			{	/*If this packet is ECN-capable (ECT) */
+				if(hf->ect()) 
 					hf->ce() = 1;
+			}
+		}
+		/* Per-port ECN marking */
+		else
+		{
+			/* Total buffer occupation is larger than low ECN marking threshold */ 
+			if(TotalByteLength()+pktSize>=port_low_thresh_*mean_pktsize_)
+			{
+				/* Queue buffer occupation is larger than weighted ECN marking threshold for this queue
+				* or total buffer occupation is larger than high ECN marking threshold */ 
+				if(qs[prio].q_->byteLength()+pktSize>=WeightedThresh()*qs[prio].weight||TotalByteLength()+pktSize>=port_high_thresh_*mean_pktsize_)
+				{	
+					if (hf->ect())
+						hf->ce() = 1;
+				}
 			}
 		}
 	}
@@ -256,6 +260,38 @@ Packet *WF2Q::deque(void)
 	}
 	if(weight>0)
 		V=max(minS, V+pktSize/weight);
+	
+	/* Dequeue ECN marking */
+	if(pkt!=NULL&&dequeue_ecn_marking_!=0)
+	{
+		hdr_flags* hf=hdr_flags::access(pkt);
+		int pktSize=hdr_cmn::access(pkt)->size();
+		/* Per-queue ECN marking */
+		if(port_ecn_marking_==0)
+		{
+			if(qs[queue].q_->byteLength()+pktSize>=queue_thresh_*mean_pktsize_)
+			{	/*If this packet is ECN-capable (ECT) */
+				if(hf->ect()) 
+					hf->ce() = 1;
+			}
+		}
+		/* Per-port ECN marking */
+		else
+		{
+			/* Total buffer occupation is larger than low ECN marking threshold */ 
+			if(TotalByteLength()+pktSize>=port_low_thresh_*mean_pktsize_)
+			{
+				/* Queue buffer occupation is larger than weighted ECN marking threshold for this queue
+				* or total buffer occupation is larger than high ECN marking threshold */ 
+				if(qs[queue].q_->byteLength()+pktSize>=WeightedThresh()*qs[queue].weight||TotalByteLength()+pktSize>=port_high_thresh_*mean_pktsize_)
+				{	
+					if (hf->ect())
+						hf->ce() = 1;
+				}
+			}
+		}
+	}
+	
 	return pkt;
 }
 

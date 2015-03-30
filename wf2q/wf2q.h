@@ -4,7 +4,7 @@
 #include "queue.h"
 #include "config.h"
 
-/*By default, we use 8 queuess */
+/*We can use 8 queuess by default */
 #define WF2Q_QUEUES 8	
 
 struct QueueState
@@ -33,6 +33,7 @@ class WF2Q : public Queue
 		long double V;	/* Virtual time , not checked for wraparound!*/
 		int queue_num_;	/*Number of queues */
 		int port_ecn_marking_;	/* Enable per-port ECN marking or not */
+		int dequeue_ecn_marking_;	/* Enable dequeue ECN marking or not */	
 		int mean_pktsize_;	/* MTU in bytes */
 		int port_low_thresh_;	/* The low per-port ECN marking threshold (pkts)*/
 		int port_high_thresh_;	/* The high per-port ECN marking threshold (pkts)*/
