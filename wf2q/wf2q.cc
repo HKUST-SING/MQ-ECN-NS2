@@ -6,6 +6,7 @@
 #include "wf2q.h"
 
 #define max(arg1,arg2) (arg1>arg2 ? arg1 : arg2)
+#define min(arg1,arg2) (arg1<arg2 ? arg1 : arg2)
 
 static class WF2QClass : public TclClass 
 {
@@ -21,32 +22,32 @@ WF2Q::WF2Q()
 {
 	/* bind variables */
 	bind("queue_num_", &queue_num_);
-	bind("port_ecn_marking_", &port_ecn_marking_);
+	//bind("port_ecn_marking_", &port_ecn_marking_);
 	bind("dequeue_ecn_marking_", &dequeue_ecn_marking_);
 	bind("mean_pktsize_", &mean_pktsize_);
-	bind("port_low_thresh_", &port_low_thresh_);
-	bind("port_high_thresh_", &port_high_thresh_);
-	bind("queue_thresh_", &queue_thresh_);
+	bind("port_thresh_",&port_thresh_);
+	//bind("port_low_thresh_", &port_low_thresh_);
+	//bind("port_high_thresh_", &port_high_thresh_);
+	//bind("queue_thresh_", &queue_thresh_);
 	
 	V=0.0;
-	if(queue_num_<=0)
-		queue_num_=WF2Q_QUEUES;
 	
 	/* Initialize queue states */
-	qs=new QueueState[queue_num_];
-	for(int i=0;i<queue_num_;i++)
+	qs=new QueueState[WF2Q_MAX_QUEUES];
+	for(int i=0;i<WF2Q_MAX_QUEUES;i++)
 	{
 		qs[i].q_=new PacketQueue;
-		/* By default, weight is 1000 for each queue given that MTU is 1500 bytes */
+		//By default, weight is 1000
 		qs[i].weight=1000.0;
 		qs[i].S=0.0;
 		qs[i].F=0.0;
+		qs[i].thresh=0;
 	}
 }
 
 WF2Q::~WF2Q() 
 {
-	for(int i=0;i<queue_num_;i++)
+	for(int i=0;i<WF2Q_MAX_QUEUES;i++)
 	{
 		delete[] qs[i].q_;
 	}
@@ -57,31 +58,48 @@ WF2Q::~WF2Q()
 int WF2Q::TotalByteLength()
 {
 	int result=0;
-	for(int i=0;i<queue_num_;i++)
+	for(int i=0;i<WF2Q_MAX_QUEUES;i++)
 	{
 		result+=qs[i].q_->byteLength();
 	}
 	return result;
 }
 
-/* return ECN marking threshold for weight '1' */
-int WF2Q::WeightedThresh()
+/* return the number of non-empty queues except for queue q */ 
+int WF2Q::NonEmptyQueues(int q)
 {
-	double bytes=0;
+	int num=0;
+	
+	for(int i=0;i<min(queue_num_,WF2Q_MAX_QUEUES);i++)
+	{
+		if(qs[i].q_->length()>=1&&i!=q)
+		{
+			num++;
+		}
+	}
+	
+	return num;
+}
+
+/* return ECN marking threshold for weight '1' */
+double WF2Q::WeightedThresh()
+{
+	double bytes=0.0;
 	double weights=0.0;
 	
-	for(int i=0;i<queue_num_;i++)
+	for(int i=0;i<min(queue_num_,WF2Q_MAX_QUEUES);i++)
 	{
-		/* We only consider no-empty queues: more than 1 packet */
-		if(qs[i].q_->length()>1)
+		//We only consider non-empty queues  
+		if(qs[i].q_->length()>=1)//&&i!=q)
 		{
-			bytes+=qs[i].weight*qs[i].q_->byteLength();
+			bytes+=qs[i].q_->byteLength();
 			weights+=qs[i].weight;
 		}
 	}
 	
 	if(weights>0)
-		return int(bytes/weights);
+		return bytes/weights;
+	//We cannot find non-empty queues 
 	else
 		return 0;
 }
@@ -89,6 +107,7 @@ int WF2Q::WeightedThresh()
 /* 
  *  entry points from OTcL to set per queue state variables
  *   - $q set-weight queue_id queue_weight
+ *   - $q set-thresh queue_id queue_thresh
  *
  *  NOTE: $q represents the discipline queue variable in OTcl.
  */
@@ -96,25 +115,48 @@ int WF2Q::command(int argc, const char*const* argv)
 {
 	if (argc == 4) 
 	{
-		if (strcmp(argv[1], "set-weight\0") == 0) 
+		if (strcmp(argv[1], "set-weight\0")==0) 
 		{
 			int queue_id=atoi(argv[2]);
-			if(queue_id<queue_num_)
+			if(queue_id<min(queue_num_,WF2Q_MAX_QUEUES)&&queue_id>=0)
 			{
-				double weight = atof(argv[3]);
+				double weight=atof(argv[3]);
 				if(weight>0)
 				{
 					qs[queue_id].weight=weight;
 					return (TCL_OK);
 				}
-				/* Negative or zero weight */
 				else
 				{
-					fprintf (stderr,"illegal weight value\n");
+					fprintf (stderr,"illegal weight value %s for queue %s\n", argv[3], argv[2]);
 					exit (1);
 				}
 			}
-			/* Exceed the maximum queue number */
+			/* Exceed the maximum queue number or smaller than 0*/
+			else
+			{
+				fprintf (stderr,"no such queue\n");
+				exit (1);
+			}
+		}
+		else if(strcmp(argv[1], "set-thresh\0")==0)
+		{
+			int queue_id=atoi(argv[2]);
+			if(queue_id<min(queue_num_,WF2Q_MAX_QUEUES)&&queue_id>=0)
+			{
+				int thresh=atoi(argv[3]);
+				if(thresh>=0)
+				{
+					qs[queue_id].thresh=thresh;
+					return (TCL_OK);
+				}
+				else
+				{
+					fprintf (stderr,"illegal thresh value %s for queue %s\n", argv[3],argv[2]);
+					exit (1);
+				}
+			}
+			/* Exceed the maximum queue number or smaller than 0*/
 			else
 			{
 				fprintf (stderr,"no such queue\n");
@@ -138,12 +180,12 @@ void WF2Q::enque(Packet *p)
 	if(TotalByteLength()+pktSize>qlimBytes)
 	{
 		drop(p);
-		printf("Packet drop\n");
+		//printf("Packet drop\n");
 		return;
 	}
 	
-	if(prio>=queue_num_)
-		prio=queue_num_-1;
+	if(prio>=min(queue_num_,WF2Q_MAX_QUEUES)&&prio>0)
+		prio=min(queue_num_,WF2Q_MAX_QUEUES)-1;
 	
 	//For debug
 	//printf ("enque to %d\n", prio);
@@ -159,13 +201,13 @@ void WF2Q::enque(Packet *p)
 		/* In theory, weight should never be zero or negative */
 		else
 		{
-			fprintf (stderr,"illegal weight value\n");
+			fprintf (stderr,"enqueue: illegal weight value for queue %d\n", prio);
 			exit(1);
 		}
 		
 		/* update system virutal clock */
 		long double minS = qs[prio].S;
-		for(int i=0;i<queue_num_;i++)
+		for(int i=0;i<min(queue_num_,WF2Q_MAX_QUEUES);i++)
 		{
 			if(qs[i].q_->length()>0&&minS>qs[i].S)
 				minS=qs[i].S;
@@ -176,30 +218,51 @@ void WF2Q::enque(Packet *p)
 	/* Enqueue ECN marking */
 	if(dequeue_ecn_marking_==0)
 	{
-		/* Per-queue ECN marking */
-		if(port_ecn_marking_==0)
+		if(qs[prio].q_->byteLength()+pktSize>=qs[prio].thresh*mean_pktsize_ && TotalByteLength()+pktSize>=port_thresh_*mean_pktsize_)
 		{
-			if(qs[prio].q_->byteLength()+pktSize>=queue_thresh_*mean_pktsize_)
-			{	/*If this packet is ECN-capable (ECT) */
+			//Calculate weighted ECN marking threshold. It should be smaller than per-port ECN marking threshold.
+			int weighted_thresh=0;
+			//If all the other queues are empty, we just use per-port ECN marking threshold
+			if(NonEmptyQueues(prio)==0)
+				weighted_thresh=port_thresh_*mean_pktsize_;
+			//Get weighted ECN marking threshold based on statistic data of all queues
+			else
+				weighted_thresh=min(WeightedThresh()*qs[prio].weight, port_thresh_*mean_pktsize_);
+			
+			//printf("weighted ECN marking threshold=%d for queue %d\n", weighted_thresh/mean_pktsize_,prio);
+			
+			if(qs[prio].q_->byteLength()+pktSize>=weighted_thresh)
+			{
+				//printf("%f\n",WeightedThresh()*qs[prio].weight);
 				if(hf->ect()) 
 					hf->ce() = 1;
 			}
 		}
+		/* Per-queue ECN marking */
+		/*if(port_ecn_marking_==0)
+		{
+			if(qs[prio].q_->byteLength()+pktSize>=queue_thresh_*mean_pktsize_)
+			{	
+				if(hf->ect()) 
+					hf->ce() = 1;
+			}
+		}*/
 		/* Per-port ECN marking */
+		/*
 		else
 		{
-			/* Total buffer occupation is larger than low ECN marking threshold */ 
+			//Total buffer occupation is larger than low ECN marking threshold 
 			if(TotalByteLength()+pktSize>=port_low_thresh_*mean_pktsize_)
 			{
-				/* Queue buffer occupation is larger than weighted ECN marking threshold for this queue
-				* or total buffer occupation is larger than high ECN marking threshold */ 
+				// Queue buffer occupation is larger than weighted ECN marking threshold for this queue
+				// or total buffer occupation is larger than high ECN marking threshold 
 				if(qs[prio].q_->byteLength()+pktSize>=WeightedThresh()*qs[prio].weight||TotalByteLength()+pktSize>=port_high_thresh_*mean_pktsize_)
 				{	
 					if (hf->ect())
 						hf->ce() = 1;
 				}
 			}
-		}
+		}*/
 	}
 
 	qs[prio].q_->enque(p); 		
@@ -214,7 +277,7 @@ Packet *WF2Q::deque(void)
 	double weight=0.0;
 	
 	/* look for the candidate queue with the earliest finish time */
-	for(i=0; i<queue_num_; i++)
+	for(i=0; i<min(queue_num_,WF2Q_MAX_QUEUES); i++)
 	{
 		if (qs[i].q_->length()==0)
 			continue;
@@ -245,14 +308,14 @@ Packet *WF2Q::deque(void)
 		}
 		else
 		{
-			fprintf (stderr,"illegal weight value\n");
+			fprintf (stderr,"dequeue: illegal weight value\n");
 			exit(1);
 		}
 	}
 	
 	/* update the virtual clock */
 	long double minS = qs[queue].S;
-	for(int i=0;i<queue_num_;i++)
+	for(int i=0;i<min(queue_num_,WF2Q_MAX_QUEUES);i++)
 	{
 		weight+=qs[i].weight;
 		if(qs[i].q_->length()>0&&minS>qs[i].S)
@@ -266,30 +329,51 @@ Packet *WF2Q::deque(void)
 	{
 		hdr_flags* hf=hdr_flags::access(pkt);
 		int pktSize=hdr_cmn::access(pkt)->size();
-		/* Per-queue ECN marking */
-		if(port_ecn_marking_==0)
+		
+		if(qs[queue].q_->byteLength()+pktSize>=qs[queue].thresh*mean_pktsize_ && TotalByteLength()+pktSize>=port_thresh_*mean_pktsize_)
 		{
-			if(qs[queue].q_->byteLength()+pktSize>=queue_thresh_*mean_pktsize_)
-			{	/*If this packet is ECN-capable (ECT) */
+			//Calculate weighted ECN marking threshold. It should be smaller than per-port ECN marking threshold.
+			int weighted_thresh=0;
+			//If all the other queues are empty, we just use per-port ECN marking threshold
+			if(NonEmptyQueues(queue)==0)
+				weighted_thresh=port_thresh_*mean_pktsize_;
+			//Get weighted ECN marking threshold based on statistic data of all queues
+			else
+				weighted_thresh=min(WeightedThresh()*qs[queue].weight, port_thresh_*mean_pktsize_);
+			
+			if(qs[queue].q_->byteLength()+pktSize>=weighted_thresh)
+			{
+				//printf("%f\n",WeightedThresh()*qs[prio].weight);
 				if(hf->ect()) 
 					hf->ce() = 1;
 			}
 		}
-		/* Per-port ECN marking */
+		
+		/*
+		// Per-queue ECN marking 
+		if(port_ecn_marking_==0)
+		{
+			if(qs[queue].q_->byteLength()+pktSize>=queue_thresh_*mean_pktsize_)
+			{	//If this packet is ECN-capable (ECT) 
+				if(hf->ect()) 
+					hf->ce() = 1;
+			}
+		}
+		// Per-port ECN marking 
 		else
 		{
-			/* Total buffer occupation is larger than low ECN marking threshold */ 
+			// Total buffer occupation is larger than low ECN marking threshold 
 			if(TotalByteLength()+pktSize>=port_low_thresh_*mean_pktsize_)
 			{
-				/* Queue buffer occupation is larger than weighted ECN marking threshold for this queue
-				* or total buffer occupation is larger than high ECN marking threshold */ 
+				// Queue buffer occupation is larger than weighted ECN marking threshold for this queue
+				// or total buffer occupation is larger than high ECN marking threshold 
 				if(qs[queue].q_->byteLength()+pktSize>=WeightedThresh()*qs[queue].weight||TotalByteLength()+pktSize>=port_high_thresh_*mean_pktsize_)
 				{	
 					if (hf->ect())
 						hf->ce() = 1;
 				}
 			}
-		}
+		}*/
 	}
 	
 	return pkt;
