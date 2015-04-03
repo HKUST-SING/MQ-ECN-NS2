@@ -1,12 +1,13 @@
 set ns [new Simulator]
 
 set K_port 80;	#The per-port ECN marking threshold
-set service1_senders 4
-set service2_senders 1
-set K_0 16; #The per-queue ECN marking threshold of the first queue
-set K_1 64; #The per-queue ECN marking threshold of the second queue
+set service1_senders 8
+set service2_senders 2
+set K_0 4; #The per-queue ECN marking threshold of the first queue
+set K_1 16; #The per-queue ECN marking threshold of the second queue
 set W_0 1000; #The weight of the first queue
 set W_1 4000; #The weight of the second queue
+set marking_schme 2
 
 set RTT 0.0001
 set DCTCP_g_ 0.0625
@@ -37,6 +38,7 @@ Queue/WF2Q set queue_num_ 2
 Queue/WF2Q set dequeue_ecn_marking_ 0
 Queue/WF2Q set mean_pktsize_ $packetSize
 Queue/WF2Q set port_thresh_ $K_port
+Queue/WF2Q set marking_scheme_ $marking_schme
 
 set mytracefile [open mytracefile.tr w]
 $ns trace-all $mytracefile

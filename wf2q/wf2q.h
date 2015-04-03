@@ -7,6 +7,16 @@
 /*We can use 8 queuess at most */
 #define WF2Q_MAX_QUEUES 8	
 
+/* Per-queue ECN marking */
+#define PER_QUEUE_MARKING 0
+/* Per-port ECN marking */
+#define PER_PORT_MARKING 1
+/* Our smart hybrid ECN marking scheme */
+#define SMART_MARKING 2
+
+/* When buffer occupation of a queue is no smaller than than QUEUE_MIN_BYTES, we think it's a 'busy' queue */
+#define QUEUE_MIN_BYTES 3000
+
 struct QueueState
 {
 	PacketQueue* q_;	/* packet queue associated to the corresponding service */
@@ -27,8 +37,7 @@ class WF2Q : public Queue
 		Packet *deque(void);
 		void enque(Packet *pkt);
 		int TotalByteLength();	/* Get total length of all queues in bytes */
-		double WeightedThresh();	/* return ECN marking threshold for weight '1' */
-		int NonEmptyQueues(int q);		/* return the number of non-empty queues except for queue q */ 
+		int MarkingECN(int q); /* Determine whether we need to mark ECN, q is current queue number */
 		
 		/* Variables */
 		struct QueueState *qs;	/* underlying multi-FIFO (CoS) queues and their states */
@@ -37,11 +46,7 @@ class WF2Q : public Queue
 		int dequeue_ecn_marking_;	/* Enable dequeue ECN marking or not */
 		int mean_pktsize_;	/* MTU in bytes */
 		int port_thresh_;	/* Per-port ECN marking threshold (pkts)*/
-			
-		//int port_ecn_marking_;	/* Enable per-port ECN marking or not */
-		//int port_low_thresh_;	/* The low per-port ECN marking threshold (pkts)*/
-		//int port_high_thresh_;	/* The high per-port ECN marking threshold (pkts)*/
-		//int queue_thresh_;	/* The per-queue ECN marking threshold (pkts)*/
+		int marking_scheme_;	/* ECN marking policy */
 };
 
 #endif

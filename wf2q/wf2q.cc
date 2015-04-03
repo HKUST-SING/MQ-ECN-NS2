@@ -22,14 +22,11 @@ WF2Q::WF2Q()
 {
 	/* bind variables */
 	bind("queue_num_", &queue_num_);
-	//bind("port_ecn_marking_", &port_ecn_marking_);
 	bind("dequeue_ecn_marking_", &dequeue_ecn_marking_);
 	bind("mean_pktsize_", &mean_pktsize_);
 	bind("port_thresh_",&port_thresh_);
-	//bind("port_low_thresh_", &port_low_thresh_);
-	//bind("port_high_thresh_", &port_high_thresh_);
-	//bind("queue_thresh_", &queue_thresh_);
-	
+	bind("marking_scheme_",&marking_scheme_);
+
 	V=0.0;
 	
 	/* Initialize queue states */
@@ -65,43 +62,71 @@ int WF2Q::TotalByteLength()
 	return result;
 }
 
-/* return the number of non-empty queues except for queue q */ 
-int WF2Q::NonEmptyQueues(int q)
-{
-	int num=0;
-	
-	for(int i=0;i<min(queue_num_,WF2Q_MAX_QUEUES);i++)
+/* Determine whether we need to mark ECN where q is current queue number. Return 1 if it requires marking */
+int WF2Q::MarkingECN(int q)
+{	
+	if(q<0||q>=min(queue_num_,WF2Q_MAX_QUEUES))
 	{
-		if(qs[i].q_->length()>=1&&i!=q)
-		{
-			num++;
-		}
+		fprintf (stderr,"illegal queue number\n");
+		exit (1);
 	}
 	
-	return num;
-}
-
-/* return ECN marking threshold for weight '1' */
-double WF2Q::WeightedThresh()
-{
-	double bytes=0.0;
-	double weights=0.0;
-	
-	for(int i=0;i<min(queue_num_,WF2Q_MAX_QUEUES);i++)
+	/* Per-queue ECN marking */
+	if(marking_scheme_==PER_QUEUE_MARKING)
 	{
-		//We only consider non-empty queues  
-		if(qs[i].q_->length()>=1)//&&i!=q)
+		if(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_)
+			return 1;
+		else
+			return 0;
+	}
+	/* Per-port ECN marking */
+	else if(marking_scheme_==PER_PORT_MARKING)
+	{
+		if(TotalByteLength()>=port_thresh_*mean_pktsize_)
+			return 1;
+		else
+			return 0;
+	}
+	/* Our smart hybrid ECN marking scheme */
+	else if(marking_scheme_==SMART_MARKING)
+	{	
+		/* We only do ECN marking when both per-queue and per-port ECN marking thresholds exceed pre-defined thresholds */ 
+		if(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_ &&TotalByteLength()>=port_thresh_*mean_pktsize_)
 		{
-			bytes+=qs[i].q_->byteLength();
-			weights+=qs[i].weight;
+			double weights=0;
+			double thresh=0;
+		
+			/* Find all 'busy' queues and get the sum of their weights */
+			for(int i=0;i<min(queue_num_,WF2Q_MAX_QUEUES);i++)
+			{
+				if(qs[i].q_->byteLength()>=QUEUE_MIN_BYTES)
+					weights+=qs[i].weight;
+			}
+	
+			if(int(weights)>0)
+			{
+				thresh=qs[q].weight*port_thresh_/weights;
+				if(qs[q].q_->byteLength()>=thresh*mean_pktsize_)
+					return 1;
+				else 
+					return 0;
+			}
+			else
+			{
+				return 0;
+			}
+		}
+		else
+		{
+			return 0;
 		}
 	}
-	
-	if(weights>0)
-		return bytes/weights;
-	//We cannot find non-empty queues 
+	/* Unknown ECN marking scheme */
 	else
+	{
+		fprintf (stderr,"Unknown ECN marking scheme\n");
 		return 0;
+	}
 }
 
 /* 
@@ -121,7 +146,7 @@ int WF2Q::command(int argc, const char*const* argv)
 			if(queue_id<min(queue_num_,WF2Q_MAX_QUEUES)&&queue_id>=0)
 			{
 				double weight=atof(argv[3]);
-				if(weight>0)
+				if(int(weight)>0)
 				{
 					qs[queue_id].weight=weight;
 					return (TCL_OK);
@@ -194,7 +219,7 @@ void WF2Q::enque(Packet *p)
 	if(qs[prio].q_->length()==0)
 	{
 		qs[prio].S=max(V, qs[prio].F);
-		if(qs[prio].weight>0)
+		if(int(qs[prio].weight)>0)
 		{
 			qs[prio].F=qs[prio].S+pktSize/qs[prio].weight;
 		}
@@ -218,53 +243,9 @@ void WF2Q::enque(Packet *p)
 	/* Enqueue ECN marking */
 	if(dequeue_ecn_marking_==0)
 	{
-		if(qs[prio].q_->byteLength()+pktSize>=qs[prio].thresh*mean_pktsize_ && TotalByteLength()+pktSize>=port_thresh_*mean_pktsize_)
-		{
-			//Calculate weighted ECN marking threshold. It should be smaller than per-port ECN marking threshold.
-			int weighted_thresh=0;
-			//If all the other queues are empty, we just use per-port ECN marking threshold
-			if(NonEmptyQueues(prio)==0)
-				weighted_thresh=port_thresh_*mean_pktsize_;
-			//Get weighted ECN marking threshold based on statistic data of all queues
-			else
-				weighted_thresh=min(WeightedThresh()*qs[prio].weight, port_thresh_*mean_pktsize_);
-			
-			//printf("weighted ECN marking threshold=%d for queue %d\n", weighted_thresh/mean_pktsize_,prio);
-			
-			if(qs[prio].q_->byteLength()+pktSize>=weighted_thresh)
-			{
-				//printf("%f\n",WeightedThresh()*qs[prio].weight);
-				if(hf->ect()) 
-					hf->ce() = 1;
-			}
-		}
-		/* Per-queue ECN marking */
-		/*if(port_ecn_marking_==0)
-		{
-			if(qs[prio].q_->byteLength()+pktSize>=queue_thresh_*mean_pktsize_)
-			{	
-				if(hf->ect()) 
-					hf->ce() = 1;
-			}
-		}*/
-		/* Per-port ECN marking */
-		/*
-		else
-		{
-			//Total buffer occupation is larger than low ECN marking threshold 
-			if(TotalByteLength()+pktSize>=port_low_thresh_*mean_pktsize_)
-			{
-				// Queue buffer occupation is larger than weighted ECN marking threshold for this queue
-				// or total buffer occupation is larger than high ECN marking threshold 
-				if(qs[prio].q_->byteLength()+pktSize>=WeightedThresh()*qs[prio].weight||TotalByteLength()+pktSize>=port_high_thresh_*mean_pktsize_)
-				{	
-					if (hf->ect())
-						hf->ce() = 1;
-				}
-			}
-		}*/
+		if(MarkingECN(prio)>0&&hf->ect())
+			hf->ce() = 1;
 	}
-
 	qs[prio].q_->enque(p); 		
 }
 
@@ -295,13 +276,14 @@ Packet *WF2Q::deque(void)
 	//printf ("deque from %d\n", queue);
 	
 	pkt=qs[queue].q_->deque();
-	
+	pktSize=hdr_cmn::access(pkt)->size();
+	  
 	/* Set the start and the finish times of the remaining packets in the queue */
 	nextPkt=qs[queue].q_->head();
 	if (nextPkt!=NULL) 
 	{
 		qs[queue].S=qs[queue].F;
-		if(qs[queue].weight>0)
+		if(int(qs[queue].weight)>0)
 		{
 			qs[queue].S=qs[queue].F;
 			qs[queue].F=qs[queue].S+(hdr_cmn::access(nextPkt)->size())/qs[queue].weight;
@@ -321,59 +303,17 @@ Packet *WF2Q::deque(void)
 		if(qs[i].q_->length()>0&&minS>qs[i].S)
 			minS=qs[i].S;
 	}
-	if(weight>0)
+	if(int(weight)>0)
 		V=max(minS, V+pktSize/weight);
 	
 	/* Dequeue ECN marking */
 	if(pkt!=NULL&&dequeue_ecn_marking_!=0)
 	{
-		hdr_flags* hf=hdr_flags::access(pkt);
-		int pktSize=hdr_cmn::access(pkt)->size();
-		
-		if(qs[queue].q_->byteLength()+pktSize>=qs[queue].thresh*mean_pktsize_ && TotalByteLength()+pktSize>=port_thresh_*mean_pktsize_)
+		hdr_flags* hf=hdr_flags::access(pkt);		
+		if(MarkingECN(queue)>0&&hf->ect()) 
 		{
-			//Calculate weighted ECN marking threshold. It should be smaller than per-port ECN marking threshold.
-			int weighted_thresh=0;
-			//If all the other queues are empty, we just use per-port ECN marking threshold
-			if(NonEmptyQueues(queue)==0)
-				weighted_thresh=port_thresh_*mean_pktsize_;
-			//Get weighted ECN marking threshold based on statistic data of all queues
-			else
-				weighted_thresh=min(WeightedThresh()*qs[queue].weight, port_thresh_*mean_pktsize_);
-			
-			if(qs[queue].q_->byteLength()+pktSize>=weighted_thresh)
-			{
-				//printf("%f\n",WeightedThresh()*qs[prio].weight);
-				if(hf->ect()) 
-					hf->ce() = 1;
-			}
+			hf->ce() = 1;
 		}
-		
-		/*
-		// Per-queue ECN marking 
-		if(port_ecn_marking_==0)
-		{
-			if(qs[queue].q_->byteLength()+pktSize>=queue_thresh_*mean_pktsize_)
-			{	//If this packet is ECN-capable (ECT) 
-				if(hf->ect()) 
-					hf->ce() = 1;
-			}
-		}
-		// Per-port ECN marking 
-		else
-		{
-			// Total buffer occupation is larger than low ECN marking threshold 
-			if(TotalByteLength()+pktSize>=port_low_thresh_*mean_pktsize_)
-			{
-				// Queue buffer occupation is larger than weighted ECN marking threshold for this queue
-				// or total buffer occupation is larger than high ECN marking threshold 
-				if(qs[queue].q_->byteLength()+pktSize>=WeightedThresh()*qs[queue].weight||TotalByteLength()+pktSize>=port_high_thresh_*mean_pktsize_)
-				{	
-					if (hf->ect())
-						hf->ce() = 1;
-				}
-			}
-		}*/
 	}
 	
 	return pkt;
