@@ -3,6 +3,7 @@
 
 #include "queue.h"
 #include "config.h"
+#include "trace.h"
 
 /*We can use 8 queuess at most */
 #define WF2Q_MAX_QUEUES 8	
@@ -47,6 +48,8 @@ class WF2Q : public Queue
 		int mean_pktsize_;	/* MTU in bytes */
 		int port_thresh_;	/* Per-port ECN marking threshold (pkts)*/
 		int marking_scheme_;	/* ECN marking policy */
+		Tcl_Channel tchan_;	/* place to write trace records */
+		void trace();	/* routine to write trace records */
 };
 
 #endif

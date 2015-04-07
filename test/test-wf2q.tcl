@@ -1,8 +1,8 @@
 set ns [new Simulator]
 
-set K_port 80;	#The per-port ECN marking threshold
 set service1_senders 8
 set service2_senders 2
+set K_port 80;	#The per-port ECN marking threshold
 set K_0 4; #The per-queue ECN marking threshold of the first queue
 set K_1 16; #The per-queue ECN marking threshold of the second queue
 set W_0 1000; #The weight of the first queue
@@ -16,7 +16,7 @@ set packetSize 1460
 set lineRate 10Gb
 
 set simulationTime 0.02
-set throughputSamplingInterval 0.0004
+set throughputSamplingInterval 0.0002
 
 Agent/TCP set windowInit_ 10
 Agent/TCP set ecn_ 1
@@ -43,13 +43,15 @@ Queue/WF2Q set marking_scheme_ $marking_schme
 set mytracefile [open mytracefile.tr w]
 $ns trace-all $mytracefile
 set throughputfile [open throughputfile.tr w]
+set qlenfile [open qlenfile.tr w]
 set tracedir tcp_flows
 
 proc finish {} {
-	global ns mytracefile throughputfile
+	global ns mytracefile throughputfile qlenfile
 	$ns flush-trace
 	close $mytracefile
 	close $throughputfile
+	close $qlenfile
 	exit 0
 }
 
@@ -65,6 +67,7 @@ $q set-weight 0 $W_0
 $q set-weight 1 $W_1
 $q set-thresh 0 $K_0
 $q set-thresh 1 $K_1
+$q attach $qlenfile 
 
 #Service type 1 senders
 for {set i 0} {$i<$service1_senders} {incr i} {
@@ -79,15 +82,6 @@ for {set i 0} {$i<$service1_senders} {incr i} {
 	$tcp1($i) set bugFix_ false
 	$tcp1($i) trace cwnd_
 	$tcp1($i) trace ack_
-    #$tcp1($i) trace srtt_
-	#$tcp1($i) trace rtt_
-	#$tcp1($i) trace ssthresh_
-	#$tcp1($i) trace nrexmit_
-	#$tcp1($i) trace nrexmitpack_
-	#$tcp1($i) trace nrexmitbytes_
-	#$tcp1($i) trace ncwndcuts_
-	#$tcp1($i) trace ncwndcuts1_
-	#$tcp1($i) trace dupacks_
 	
 	$ns attach-agent $n1($i) $tcp1($i)
     $ns attach-agent $receiver $sink1($i)
@@ -112,15 +106,6 @@ for {set i 0} {$i<$service2_senders} {incr i} {
 	$tcp2($i) set bugFix_ false
 	$tcp2($i) trace cwnd_
 	$tcp2($i) trace ack_
-    #$tcp2($i) trace srtt_
-	#$tcp2($i) trace rtt_
-	#$tcp2($i) trace ssthresh_
-	#$tcp2($i) trace nrexmit_
-	#$tcp2($i) trace nrexmitpack_
-	#$tcp2($i) trace nrexmitbytes_
-	#$tcp2($i) trace ncwndcuts_
-	#$tcp2($i) trace ncwndcuts1_
-	#$tcp2($i) trace dupacks_
 	
 	$ns attach-agent $n2($i) $tcp2($i)
     $ns attach-agent $receiver $sink2($i)
@@ -143,18 +128,18 @@ proc record {} {
 	
 	set bw1 0
 	for {set i 0} {$i<$service1_senders} {incr i} {
-		set bytes [$tcp1($i) set bytes_]
+		set bytes [$sink1($i) set bytes_]
 		set bw1 [expr $bw1+$bytes]
-		$tcp1($i) set bytes_ 0	
+		$sink1($i) set bytes_ 0	
 	}
 	append str " "
 	append str [expr int($bw1/$throughputSamplingInterval*8/1000000)];	#throughput in Mbps
 	
 	set bw2 0
 	for {set i 0} {$i<$service2_senders} {incr i} {
-		set bytes [$tcp2($i) set bytes_]
+		set bytes [$sink2($i) set bytes_]
 		set bw2 [expr $bw2+$bytes]
-		$tcp2($i) set bytes_ 0	
+		$sink2($i) set bytes_ 0	
 	}
 	append str " "
 	append str [expr int($bw2/$throughputSamplingInterval*8/1000000)];	#throughput in Mbps

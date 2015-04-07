@@ -926,7 +926,7 @@ FullTcpAgent::sendpacket(int seqno, int ackno, int pflags, int datalen, int reas
 	iph->prio()=serviceid_;
 	
 	//Update bytes sent
-	bytes_+=datalen;
+	//bytes_+=datalen;
 	
 	send(p, 0);
 
@@ -1540,6 +1540,9 @@ FullTcpAgent::recv(Packet *pkt, Handler*)
 	int ackno = tcph->ackno();		 // ack # from packet
 	int tiflags = tcph->flags() ; 		 // tcp flags from packet
 
+	//Added by Wei Bai
+	bytes_+=datalen;
+	
 //if (state_ != TCPS_ESTABLISHED || (tiflags&(TH_SYN|TH_FIN))) {
 //fprintf(stdout, "%f(%s)in state %s recv'd this packet: ", now(), name(), statestr(state_));
 //prpkt(pkt);

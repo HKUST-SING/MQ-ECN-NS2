@@ -90,8 +90,8 @@ int WF2Q::MarkingECN(int q)
 	/* Our smart hybrid ECN marking scheme */
 	else if(marking_scheme_==SMART_MARKING)
 	{	
-		/* We only do ECN marking when both per-queue and per-port ECN marking thresholds exceed pre-defined thresholds */ 
-		if(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_ &&TotalByteLength()>=port_thresh_*mean_pktsize_)
+		/* We only do ECN marking when per-queue buffer occupation exceeds the pre-defined threshold */ 
+		if(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_)//&&TotalByteLength()>=port_thresh_*mean_pktsize_)
 		{
 			double weights=0;
 			double thresh=0;
@@ -133,14 +133,32 @@ int WF2Q::MarkingECN(int q)
  *  entry points from OTcL to set per queue state variables
  *   - $q set-weight queue_id queue_weight
  *   - $q set-thresh queue_id queue_thresh
+ *   - $q attach file
  *
  *  NOTE: $q represents the discipline queue variable in OTcl.
  */
 int WF2Q::command(int argc, const char*const* argv)
 {
-	if (argc == 4) 
+	if(argc==3)
 	{
-		if (strcmp(argv[1], "set-weight\0")==0) 
+		// attach a file for variable tracing
+		if (strcmp(argv[1], "attach") == 0) 
+		{
+			int mode;
+			const char* id = argv[2];
+			Tcl& tcl = Tcl::instance();
+			tchan_=Tcl_GetChannel(tcl.interp(), (char*)id, &mode);
+			if (tchan_==0) 
+			{
+				tcl.resultf("WF2Q: trace: can't attach %s for writing", id);
+				return (TCL_ERROR);
+			}
+			return (TCL_OK);
+		}
+	}
+	else if (argc == 4) 
+	{
+		if (strcmp(argv[1], "set-weight")==0) 
 		{
 			int queue_id=atoi(argv[2]);
 			if(queue_id<min(queue_num_,WF2Q_MAX_QUEUES)&&queue_id>=0)
@@ -164,7 +182,7 @@ int WF2Q::command(int argc, const char*const* argv)
 				exit (1);
 			}
 		}
-		else if(strcmp(argv[1], "set-thresh\0")==0)
+		else if(strcmp(argv[1], "set-thresh")==0)
 		{
 			int queue_id=atoi(argv[2]);
 			if(queue_id<min(queue_num_,WF2Q_MAX_QUEUES)&&queue_id>=0)
@@ -200,7 +218,7 @@ void WF2Q::enque(Packet *p)
 	hdr_flags* hf=hdr_flags::access(p);
 	int pktSize=hdr_cmn::access(p)->size();
 	int qlimBytes=qlim_*mean_pktsize_;
-	
+		
 	/* The shared buffer is overfilld */
 	if(TotalByteLength()+pktSize>qlimBytes)
 	{
@@ -247,6 +265,7 @@ void WF2Q::enque(Packet *p)
 			hf->ce() = 1;
 	}
 	qs[prio].q_->enque(p); 		
+	trace();
 }
 
 Packet *WF2Q::deque(void)
@@ -316,6 +335,22 @@ Packet *WF2Q::deque(void)
 		}
 	}
 	
+	trace();
 	return pkt;
 }
 
+/* routine to write trace records */
+void WF2Q::trace()
+{
+	if (tchan_) 
+	{
+		char wrk[500]={0};
+		int n;
+		double t = Scheduler::instance().clock();
+		sprintf(wrk, "%g, %d", t,TotalByteLength());
+		n=strlen(wrk);
+		wrk[n] = '\n'; 
+		wrk[n+1] = 0;
+		(void)Tcl_Write(tchan_, wrk, n+1);
+	}
+}

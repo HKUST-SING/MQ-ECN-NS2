@@ -140,7 +140,7 @@ protected:
 	virtual void delay_bind_init_all();
 	virtual int delay_bind_dispatch(const char *varName, const char *localName, TclObject *tracer);
 	
-	int bytes_;	//Wei: bytes sent 
+	int bytes_;	//Wei: bytes received
 	int serviceid_;	//Wei: service id
 	int closed_;
 	int ts_option_size_;	// header bytes in a ts option
