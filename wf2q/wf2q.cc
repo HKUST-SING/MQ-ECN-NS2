@@ -96,10 +96,10 @@ int WF2Q::MarkingECN(int q)
 			double weights=0;
 			double thresh=0;
 		
-			/* Find all 'busy' queues and get the sum of their weights */
+			/* Find all 'busy' (backlogged) queues and get the sum of their weights */
 			for(int i=0;i<min(queue_num_,WF2Q_MAX_QUEUES);i++)
 			{
-				if(qs[i].q_->byteLength()>=QUEUE_MIN_BYTES)
+				if(qs[i].q_->length()>1)
 					weights+=qs[i].weight;
 			}
 	
@@ -141,14 +141,27 @@ int WF2Q::command(int argc, const char*const* argv)
 {
 	if(argc==3)
 	{
-		// attach a file for variable tracing
-		if (strcmp(argv[1], "attach") == 0) 
+		// attach a file to trace total queue length
+		if (strcmp(argv[1], "attach-total") == 0) 
 		{
 			int mode;
 			const char* id = argv[2];
 			Tcl& tcl = Tcl::instance();
-			tchan_=Tcl_GetChannel(tcl.interp(), (char*)id, &mode);
-			if (tchan_==0) 
+			total_qlen_tchan_=Tcl_GetChannel(tcl.interp(), (char*)id, &mode);
+			if (total_qlen_tchan_==0) 
+			{
+				tcl.resultf("WF2Q: trace: can't attach %s for writing", id);
+				return (TCL_ERROR);
+			}
+			return (TCL_OK);
+		}
+		else if (strcmp(argv[1], "attach-queue") == 0) 
+		{
+			int mode;
+			const char* id = argv[2];
+			Tcl& tcl = Tcl::instance();
+			qlen_tchan_=Tcl_GetChannel(tcl.interp(), (char*)id, &mode);
+			if (qlen_tchan_==0) 
 			{
 				tcl.resultf("WF2Q: trace: can't attach %s for writing", id);
 				return (TCL_ERROR);
@@ -265,7 +278,8 @@ void WF2Q::enque(Packet *p)
 			hf->ce() = 1;
 	}
 	qs[prio].q_->enque(p); 		
-	trace();
+	trace_qlen();
+	trace_total_qlen();
 }
 
 Packet *WF2Q::deque(void)
@@ -335,14 +349,17 @@ Packet *WF2Q::deque(void)
 		}
 	}
 	
-	trace();
+	//For debug. This should not happen
+	if(TotalByteLength()>0&&pkt==NULL)
+		fprintf (stderr,"not work conserving\n");
+	
 	return pkt;
 }
 
-/* routine to write trace records */
-void WF2Q::trace()
+/* routine to write total qlen records */
+void WF2Q::trace_total_qlen()
 {
-	if (tchan_) 
+	if (total_qlen_tchan_) 
 	{
 		char wrk[500]={0};
 		int n;
@@ -351,6 +368,30 @@ void WF2Q::trace()
 		n=strlen(wrk);
 		wrk[n] = '\n'; 
 		wrk[n+1] = 0;
-		(void)Tcl_Write(tchan_, wrk, n+1);
+		(void)Tcl_Write(total_qlen_tchan_, wrk, n+1);
+	}
+}
+
+/* routine to write per-queue qlen records */
+void WF2Q::trace_qlen()
+{
+	if (qlen_tchan_) 
+	{
+		char wrk[500]={0};
+		int n;
+		double t = Scheduler::instance().clock();
+		sprintf(wrk, "%g", t);
+		n=strlen(wrk);
+		wrk[n]=0; 
+		(void)Tcl_Write(qlen_tchan_, wrk, n);
+		
+		for(int i=0;i<min(queue_num_,WF2Q_MAX_QUEUES); i++)
+		{
+			sprintf(wrk, ", %d",qs[i].q_->byteLength());
+			n=strlen(wrk);
+			wrk[n]=0; 
+			(void)Tcl_Write(qlen_tchan_, wrk, n);
+		}
+		(void)Tcl_Write(qlen_tchan_, "\n", 1);
 	}
 }

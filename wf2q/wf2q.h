@@ -15,9 +15,6 @@
 /* Our smart hybrid ECN marking scheme */
 #define SMART_MARKING 2
 
-/* When buffer occupation of a queue is no smaller than than QUEUE_MIN_BYTES, we think it's a 'busy' queue */
-#define QUEUE_MIN_BYTES 3000
-
 struct QueueState
 {
 	PacketQueue* q_;	/* packet queue associated to the corresponding service */
@@ -48,8 +45,10 @@ class WF2Q : public Queue
 		int mean_pktsize_;	/* MTU in bytes */
 		int port_thresh_;	/* Per-port ECN marking threshold (pkts)*/
 		int marking_scheme_;	/* ECN marking policy */
-		Tcl_Channel tchan_;	/* place to write trace records */
-		void trace();	/* routine to write trace records */
+		Tcl_Channel total_qlen_tchan_;	/* place to write total_qlen records */
+		Tcl_Channel qlen_tchan_;	/* place to write per-queue qlen records */
+		void trace_total_qlen();	/* routine to write total qlen records */
+		void trace_qlen();	/* routine to write per-queue qlen records */
 };
 
 #endif

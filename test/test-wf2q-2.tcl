@@ -1,12 +1,19 @@
+#Experiment setup: service 1, service 2 and service 3 traffic start respectively and have equal weight.
+#The total demand of service 3 traffic is restricted to 0.3C (C is link capacity)
+
 set ns [new Simulator]
 
-set service1_senders 8
-set service2_senders 2
+set service1_senders 2
+set service2_senders 4
+set service3_senders 2
+
 set K_port 80;	#The per-port ECN marking threshold
-set K_0 4; #The per-queue ECN marking threshold of the first queue
-set K_1 16; #The per-queue ECN marking threshold of the second queue
-set W_0 1000; #The weight of the first queue
-set W_1 4000; #The weight of the second queue
+set K_0 10; #The per-queue ECN marking threshold of the first queue
+set K_1 10; #The per-queue ECN marking threshold of the second queue
+set K_2 10; #The per-queue ECN marking threshold of the third queue
+set W_0 2000; #The weight of the first queue
+set W_1 2000; #The weight of the second queue
+set W_2 2000; #The weight of the third  queue
 set marking_schme 2
 
 set RTT 0.0001
@@ -15,7 +22,7 @@ set ackRatio 1
 set packetSize 1460
 set lineRate 10Gb
 
-set simulationTime 0.02
+set simulationTime 0.03
 set throughputSamplingInterval 0.0002
 
 Agent/TCP set windowInit_ 10
@@ -34,7 +41,7 @@ Agent/TCP/FullTcp set spa_thresh_ 3000;
 Agent/TCP/FullTcp set interval_ 0.04 ; #delayed ACK interval = 40ms
 
 Queue set limit_ 1000
-Queue/WF2Q set queue_num_ 2
+Queue/WF2Q set queue_num_ 3
 Queue/WF2Q set dequeue_ecn_marking_ 0
 Queue/WF2Q set mean_pktsize_ $packetSize
 Queue/WF2Q set port_thresh_ $K_port
@@ -66,8 +73,10 @@ set L [$ns link $switch $receiver]
 set q [$L set queue_]
 $q set-weight 0 $W_0
 $q set-weight 1 $W_1
+$q set-weight 2 $W_2
 $q set-thresh 0 $K_0
 $q set-thresh 1 $K_1
+$q set-thresh 2 $K_2
 $q attach-total $tot_qlenfile
 $q attach-queue $qlenfile
 
@@ -116,11 +125,43 @@ for {set i 0} {$i<$service2_senders} {incr i} {
 	set ftp2($i) [new Application/FTP]
 	$ftp2($i) attach-agent $tcp2($i)
 	$ftp2($i) set type_ FTP
-	$ns at [expr $simulationTime/2] "$ftp2($i) start"
+	$ns at [expr $simulationTime/3] "$ftp2($i) start"
+}
+
+#Service type 3 senders
+for {set i 0} {$i<$service3_senders} {incr i} {
+	set n3($i) [$ns node]
+    $ns duplex-link $n3($i) $switch $lineRate [expr $RTT/4] DropTail
+	set tcp3($i) [new Agent/TCP/FullTcp/Sack]
+	set sink3($i) [new Agent/TCP/FullTcp/Sack]
+	$tcp3($i) set serviceid_ 2
+	$sink3($i) listen
+	
+	$tcp3($i) attach [open ./$tracedir/[expr $i+$service1_senders+$service2_senders].tr w]
+	$tcp3($i) set bugFix_ false
+	$tcp3($i) trace cwnd_
+	$tcp3($i) trace ack_
+	
+	$ns attach-agent $n3($i) $tcp3($i)
+    $ns attach-agent $receiver $sink3($i)
+	$ns connect $tcp3($i) $sink3($i)       
+	
+	set ftp3($i) [new Application/FTP]
+	$ftp3($i) attach-agent $tcp3($i)
+	$ftp3($i) set type_ FTP
+	
+	###Add token bucket rate limiter
+	set tbf($i) [new TBF]
+	$tbf($i) set bucket_ 64000
+	$tbf($i) set rate_ [expr 3000/$service3_senders]Mbit
+	$tbf($i) set qlen_ 1000
+	$ns attach-tbf-agent $n3($i) $tcp3($i) $tbf($i)
+		
+	$ns at [expr $simulationTime*2/3] "$ftp3($i) start"
 }
 
 proc record {} {
-	global ns throughputfile throughputSamplingInterval service1_senders service2_senders tcp1 sink1 tcp2 sink2 
+	global ns throughputfile throughputSamplingInterval service1_senders service2_senders service3_senders tcp1 sink1 tcp2 sink2 tcp3 sink3 
 	
 	#Get the current time
 	set now [$ns now]
@@ -148,6 +189,15 @@ proc record {} {
 	append str " "
 	append str [expr int($bw2/$throughputSamplingInterval*8/1000000)];	#throughput in Mbps
 	
+	set bw3 0
+	for {set i 0} {$i<$service3_senders} {incr i} {
+		set bytes [$sink3($i) set bytes_]
+		set bw3 [expr $bw3+$bytes]
+		$sink3($i) set bytes_ 0	
+	}
+	append str " "
+	append str [expr int($bw3/$throughputSamplingInterval*8/1000000)];	#throughput in Mbps
+	
 	puts $throughputfile $str 
 	
 	#Set next callback time
@@ -158,3 +208,4 @@ proc record {} {
 $ns at 0.0 "record"
 $ns at [expr $simulationTime] "finish"
 $ns run
+
