@@ -3,22 +3,22 @@
 #include <string.h>
 #include <float.h>
 #include "flags.h"
-#include "wf2q.h"
+#include "wfq.h"
 
 #define max(arg1,arg2) (arg1>arg2 ? arg1 : arg2)
 #define min(arg1,arg2) (arg1<arg2 ? arg1 : arg2)
 
-static class WF2QClass : public TclClass 
+static class WFQClass : public TclClass 
 {
 	public:
-		WF2QClass() : TclClass("Queue/WF2Q") {}
+		WFQClass() : TclClass("Queue/WFQ") {}
 		TclObject* create(int argc, const char*const* argv) 
 		{
-			return (new WF2Q);
+			return (new WFQ);
 		}
-} class_wf2q;
+} class_wfq;
 
-WF2Q::WF2Q()
+WFQ::WFQ()
 {
 	/* bind variables */
 	bind("queue_num_", &queue_num_);
@@ -30,21 +30,21 @@ WF2Q::WF2Q()
 	V=0.0;
 	
 	/* Initialize queue states */
-	qs=new QueueState[WF2Q_MAX_QUEUES];
-	for(int i=0;i<WF2Q_MAX_QUEUES;i++)
+	qs=new QueueState[WFQ_MAX_QUEUES];
+	for(int i=0;i<WFQ_MAX_QUEUES;i++)
 	{
 		qs[i].q_=new PacketQueue;
-		//By default, weight is 1000
-		qs[i].weight=1000.0;
+		//By default, weight is 10000
+		qs[i].weight=10000.0;
 		qs[i].S=0.0;
 		qs[i].F=0.0;
 		qs[i].thresh=0;
 	}
 }
 
-WF2Q::~WF2Q() 
+WFQ::~WFQ() 
 {
-	for(int i=0;i<WF2Q_MAX_QUEUES;i++)
+	for(int i=0;i<WFQ_MAX_QUEUES;i++)
 	{
 		delete[] qs[i].q_;
 	}
@@ -52,10 +52,10 @@ WF2Q::~WF2Q()
 }
 
 /* Get total length of all queues in bytes */
-int WF2Q::TotalByteLength()
+int WFQ::TotalByteLength()
 {
 	int result=0;
-	for(int i=0;i<WF2Q_MAX_QUEUES;i++)
+	for(int i=0;i<WFQ_MAX_QUEUES;i++)
 	{
 		result+=qs[i].q_->byteLength();
 	}
@@ -63,9 +63,9 @@ int WF2Q::TotalByteLength()
 }
 
 /* Determine whether we need to mark ECN where q is current queue number. Return 1 if it requires marking */
-int WF2Q::MarkingECN(int q)
+int WFQ::MarkingECN(int q)
 {	
-	if(q<0||q>=min(queue_num_,WF2Q_MAX_QUEUES))
+	if(q<0||q>=min(queue_num_,WFQ_MAX_QUEUES))
 	{
 		fprintf (stderr,"illegal queue number\n");
 		exit (1);
@@ -97,13 +97,13 @@ int WF2Q::MarkingECN(int q)
 			double thresh=0;
 		
 			/* Find all 'busy' (backlogged) queues and get the sum of their weights */
-			for(int i=0;i<min(queue_num_,WF2Q_MAX_QUEUES);i++)
+			for(int i=0;i<min(queue_num_,WFQ_MAX_QUEUES);i++)
 			{
 				if(qs[i].q_->length()>1)
 					weights+=qs[i].weight;
 			}
 	
-			if(int(weights)>0)
+			if(weights>0)
 			{
 				thresh=qs[q].weight*port_thresh_/weights;
 				if(qs[q].q_->byteLength()>=thresh*mean_pktsize_)
@@ -131,13 +131,14 @@ int WF2Q::MarkingECN(int q)
 
 /* 
  *  entry points from OTcL to set per queue state variables
- *   - $q set-weight queue_id queue_weight
+ *   - $q set-weight queue_id queue_weight	
  *   - $q set-thresh queue_id queue_thresh
- *   - $q attach file
+ *   - $q attach-total file
+ *	  - $q attach-queue file
  *
  *  NOTE: $q represents the discipline queue variable in OTcl.
  */
-int WF2Q::command(int argc, const char*const* argv)
+int WFQ::command(int argc, const char*const* argv)
 {
 	if(argc==3)
 	{
@@ -150,7 +151,7 @@ int WF2Q::command(int argc, const char*const* argv)
 			total_qlen_tchan_=Tcl_GetChannel(tcl.interp(), (char*)id, &mode);
 			if (total_qlen_tchan_==0) 
 			{
-				tcl.resultf("WF2Q: trace: can't attach %s for writing", id);
+				tcl.resultf("WFQ: trace: can't attach %s for writing", id);
 				return (TCL_ERROR);
 			}
 			return (TCL_OK);
@@ -163,7 +164,7 @@ int WF2Q::command(int argc, const char*const* argv)
 			qlen_tchan_=Tcl_GetChannel(tcl.interp(), (char*)id, &mode);
 			if (qlen_tchan_==0) 
 			{
-				tcl.resultf("WF2Q: trace: can't attach %s for writing", id);
+				tcl.resultf("WFQ: trace: can't attach %s for writing", id);
 				return (TCL_ERROR);
 			}
 			return (TCL_OK);
@@ -174,10 +175,10 @@ int WF2Q::command(int argc, const char*const* argv)
 		if (strcmp(argv[1], "set-weight")==0) 
 		{
 			int queue_id=atoi(argv[2]);
-			if(queue_id<min(queue_num_,WF2Q_MAX_QUEUES)&&queue_id>=0)
+			if(queue_id<min(queue_num_,WFQ_MAX_QUEUES)&&queue_id>=0)
 			{
 				double weight=atof(argv[3]);
-				if(int(weight)>0)
+				if(weight>0)
 				{
 					qs[queue_id].weight=weight;
 					return (TCL_OK);
@@ -198,7 +199,7 @@ int WF2Q::command(int argc, const char*const* argv)
 		else if(strcmp(argv[1], "set-thresh")==0)
 		{
 			int queue_id=atoi(argv[2]);
-			if(queue_id<min(queue_num_,WF2Q_MAX_QUEUES)&&queue_id>=0)
+			if(queue_id<min(queue_num_,WFQ_MAX_QUEUES)&&queue_id>=0)
 			{
 				int thresh=atoi(argv[3]);
 				if(thresh>=0)
@@ -224,7 +225,7 @@ int WF2Q::command(int argc, const char*const* argv)
 }
 
 /* Receive a new packet */
-void WF2Q::enque(Packet *p)
+void WFQ::enque(Packet *p)
 {
 	hdr_ip *iph=hdr_ip::access(p);
 	int prio=iph->prio();
@@ -240,8 +241,8 @@ void WF2Q::enque(Packet *p)
 		return;
 	}
 	
-	if(prio>=min(queue_num_,WF2Q_MAX_QUEUES)&&prio>0)
-		prio=min(queue_num_,WF2Q_MAX_QUEUES)-1;
+	if(prio>=min(queue_num_,WFQ_MAX_QUEUES)&&prio>0)
+		prio=min(queue_num_,WFQ_MAX_QUEUES)-1;
 	
 	//For debug
 	//printf ("enque to %d\n", prio);
@@ -250,7 +251,7 @@ void WF2Q::enque(Packet *p)
 	if(qs[prio].q_->length()==0)
 	{
 		qs[prio].S=max(V, qs[prio].F);
-		if(int(qs[prio].weight)>0)
+		if(qs[prio].weight>0)
 		{
 			qs[prio].F=qs[prio].S+pktSize/qs[prio].weight;
 		}
@@ -263,7 +264,7 @@ void WF2Q::enque(Packet *p)
 		
 		/* update system virutal clock */
 		long double minS = qs[prio].S;
-		for(int i=0;i<min(queue_num_,WF2Q_MAX_QUEUES);i++)
+		for(int i=0;i<min(queue_num_,WFQ_MAX_QUEUES);i++)
 		{
 			if(qs[i].q_->length()>0&&minS>qs[i].S)
 				minS=qs[i].S;
@@ -282,20 +283,21 @@ void WF2Q::enque(Packet *p)
 	trace_total_qlen();
 }
 
-Packet *WF2Q::deque(void)
+Packet *WFQ::deque(void)
 {
 	Packet *pkt=NULL, *nextPkt=NULL;
 	int i, pktSize;
 	long double minF=LDBL_MAX ;
 	int queue=-1;
 	double weight=0.0;
+	int tot_len=TotalByteLength();
 	
 	/* look for the candidate queue with the earliest finish time */
-	for(i=0; i<min(queue_num_,WF2Q_MAX_QUEUES); i++)
+	for(i=0; i<min(queue_num_,WFQ_MAX_QUEUES); i++)
 	{
 		if (qs[i].q_->length()==0)
 			continue;
-		if (qs[i].S<=V && qs[i].F<minF)
+		if (qs[i].F<minF)//qs[i].S<=V && qs[i].F<minF)
 		{
 			queue=i;
 			minF=qs[i].F;
@@ -303,7 +305,12 @@ Packet *WF2Q::deque(void)
 	}
 	
 	if (queue==-1)
+	{
+		//For debug. This should not happen
+		if(tot_len>0)
+			fprintf (stderr,"not work conserving\n");
 		return NULL;
+	}
 	
 	//For debug
 	//printf ("deque from %d\n", queue);
@@ -316,7 +323,7 @@ Packet *WF2Q::deque(void)
 	if (nextPkt!=NULL) 
 	{
 		qs[queue].S=qs[queue].F;
-		if(int(qs[queue].weight)>0)
+		if(qs[queue].weight>0)
 		{
 			qs[queue].S=qs[queue].F;
 			qs[queue].F=qs[queue].S+(hdr_cmn::access(nextPkt)->size())/qs[queue].weight;
@@ -330,13 +337,13 @@ Packet *WF2Q::deque(void)
 	
 	/* update the virtual clock */
 	long double minS = qs[queue].S;
-	for(int i=0;i<min(queue_num_,WF2Q_MAX_QUEUES);i++)
+	for(int i=0;i<min(queue_num_,WFQ_MAX_QUEUES);i++)
 	{
 		weight+=qs[i].weight;
 		if(qs[i].q_->length()>0&&minS>qs[i].S)
 			minS=qs[i].S;
 	}
-	if(int(weight)>0)
+	if(weight>0)
 		V=max(minS, V+pktSize/weight);
 	
 	/* Dequeue ECN marking */
@@ -350,14 +357,14 @@ Packet *WF2Q::deque(void)
 	}
 	
 	//For debug. This should not happen
-	if(TotalByteLength()>0&&pkt==NULL)
+	if(tot_len>0&&pkt==NULL)
 		fprintf (stderr,"not work conserving\n");
 	
 	return pkt;
 }
 
 /* routine to write total qlen records */
-void WF2Q::trace_total_qlen()
+void WFQ::trace_total_qlen()
 {
 	if (total_qlen_tchan_) 
 	{
@@ -373,7 +380,7 @@ void WF2Q::trace_total_qlen()
 }
 
 /* routine to write per-queue qlen records */
-void WF2Q::trace_qlen()
+void WFQ::trace_qlen()
 {
 	if (qlen_tchan_) 
 	{
@@ -385,7 +392,7 @@ void WF2Q::trace_qlen()
 		wrk[n]=0; 
 		(void)Tcl_Write(qlen_tchan_, wrk, n);
 		
-		for(int i=0;i<min(queue_num_,WF2Q_MAX_QUEUES); i++)
+		for(int i=0;i<min(queue_num_,WFQ_MAX_QUEUES); i++)
 		{
 			sprintf(wrk, ", %d",qs[i].q_->byteLength());
 			n=strlen(wrk);

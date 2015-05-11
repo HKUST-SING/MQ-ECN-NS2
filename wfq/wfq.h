@@ -1,12 +1,12 @@
-#ifndef ns_wf2q_h
-#define ns_wf2q_h
+#ifndef ns_wfq_h
+#define ns_wfq_h
 
 #include "queue.h"
 #include "config.h"
 #include "trace.h"
 
 /*We can use 8 queuess at most */
-#define WF2Q_MAX_QUEUES 8	
+#define WFQ_MAX_QUEUES 8	
 
 /* Per-queue ECN marking */
 #define PER_QUEUE_MARKING 0
@@ -24,11 +24,11 @@ struct QueueState
 	int thresh;	/* Per-queue ECN marking threshold (pkts)*/
 };
 
-class WF2Q : public Queue 
+class WFQ : public Queue 
 {
 	public:
-		WF2Q();
-		~WF2Q();
+		WFQ();
+		~WFQ();
 		virtual int command(int argc, const char*const* argv);
 		
 	protected:

@@ -11,9 +11,9 @@ set K_port 80;	#The per-port ECN marking threshold
 set K_0 10; #The per-queue ECN marking threshold of the first queue
 set K_1 10; #The per-queue ECN marking threshold of the second queue
 set K_2 10; #The per-queue ECN marking threshold of the third queue
-set W_0 2000; #The weight of the first queue
-set W_1 2000; #The weight of the second queue
-set W_2 2000; #The weight of the third  queue
+set W_0 20000; #The weight of the first queue
+set W_1 20000; #The weight of the second queue
+set W_2 20000; #The weight of the third  queue
 set marking_schme 2
 
 set RTT 0.0001
@@ -41,11 +41,11 @@ Agent/TCP/FullTcp set spa_thresh_ 3000;
 Agent/TCP/FullTcp set interval_ 0.04 ; #delayed ACK interval = 40ms
 
 Queue set limit_ 1000
-Queue/WF2Q set queue_num_ 3
-Queue/WF2Q set dequeue_ecn_marking_ 0
-Queue/WF2Q set mean_pktsize_ $packetSize
-Queue/WF2Q set port_thresh_ $K_port
-Queue/WF2Q set marking_scheme_ $marking_schme
+Queue/WFQ set queue_num_ 3
+Queue/WFQ set dequeue_ecn_marking_ 0
+Queue/WFQ set mean_pktsize_ $packetSize
+Queue/WFQ set port_thresh_ $K_port
+Queue/WFQ set marking_scheme_ $marking_schme
 
 set mytracefile [open mytracefile.tr w]
 $ns trace-all $mytracefile
@@ -66,7 +66,7 @@ proc finish {} {
 set switch [$ns node]
 set receiver [$ns node]
 
-$ns simplex-link $switch $receiver $lineRate [expr $RTT/4] WF2Q
+$ns simplex-link $switch $receiver $lineRate [expr $RTT/4] WFQ
 $ns simplex-link $receiver $switch $lineRate [expr $RTT/4] DropTail
 
 set L [$ns link $switch $receiver] 
