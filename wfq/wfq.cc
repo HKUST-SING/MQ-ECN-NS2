@@ -28,6 +28,8 @@ WFQ::WFQ()
 	bind("marking_scheme_",&marking_scheme_);
 
 	V=0.0;
+	total_qlen_tchan_=NULL;
+	qlen_tchan_=NULL;
 	
 	/* Initialize queue states */
 	qs=new QueueState[WFQ_MAX_QUEUES];
