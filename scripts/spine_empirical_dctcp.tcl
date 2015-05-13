@@ -4,7 +4,7 @@ set ns [new Simulator]
 set sim_start [clock seconds]
 puts "Host: [exec uname -a]"
 
-if {$argc != 22} {
+if {$argc != 23} {
     puts "wrong number of arguments $argc"
     exit 0
 }
@@ -24,22 +24,23 @@ set perflowMP [lindex $argv 10]
 #### Transport settings options
 set sourceAlg [lindex $argv 11] ; # Sack or DCTCP-Sack
 set ackRatio [lindex $argv 12]
-set enableHRTimer 0
 set slowstartrestart [lindex $argv 13]
 set DCTCP_g [lindex $argv 14] ; # DCTCP alpha estimation gain
 set min_rto [lindex $argv 15]
 #### Switch side options
-set ECN_scheme [lindex $argv 16]
+set ECN_scheme [lindex $argv 16]; #per-queue standard (0), per-port (1), our smart algorithm (2) and per-queue min (3)
 set DCTCP_K [lindex $argv 17]
 #### topology
 set topology_spt [lindex $argv 18]
 set topology_tors [lindex $argv 19]
 set topology_spines [lindex $argv 20]
 set topology_x [lindex $argv 21]
+#### FCT log file
+set fct_log [lindex $argv 22]
 
-#### Packet size is in bytes.
-set pktSize 1460
-set service_num 8
+set pktSize 1460; #packet size in bytes
+set service_num 8; #service queue number
+set weight 1000000
 
 puts "Simulation input:" 
 puts "Dynamic Flow - Pareto"
@@ -56,13 +57,14 @@ puts "enableMultiPath=$enableMultiPath, perflowMP=$perflowMP"
 puts "source algorithm: $sourceAlg"
 puts "ackRatio $ackRatio"
 puts "DCTCP_g $DCTCP_g"
-puts "HR-Timer $enableHRTimer"
+#puts "HR-Timer $enableHRTimer"
 puts "slow-start Restart $slowstartrestart"
 puts "ECN marking scheme $ECN_scheme"
 puts "DCTCP_K_ $DCTCP_K"
 puts "pktSize(payload) $pktSize Bytes"
 puts "pktSize(include header) [expr $pktSize + 40] Bytes"
 puts "service number $service_num"
+puts "FCT log file $fct_log"
 puts " "
 
 ################# Transport Options ####################
@@ -78,18 +80,17 @@ Agent/TCP set slow_start_restart_ $slowstartrestart
 Agent/TCP set windowOption_ 0
 Agent/TCP set tcpTick_ 0.000001
 Agent/TCP set minrto_ $min_rto
-Agent/TCP set maxrto_ 2
+Agent/TCP set maxrto_ 64
 
 Agent/TCP/FullTcp set nodelay_ true; # disable Nagle
 Agent/TCP/FullTcp set segsperack_ $ackRatio
 Agent/TCP/FullTcp set interval_ 0
-Agent/TCP/FullTcp/Sack set clear_on_timeout_ false;
-Agent/TCP/FullTcp/Sack set sack_rtx_threshmode_ 2;
 
-if {$enableHRTimer != 0} {
-    Agent/TCP set minrto_ 0.00100 ; # 1ms
-    Agent/TCP set tcpTick_ 0.000001
-}
+#if {$enableHRTimer != 0} {
+#   Agent/TCP set minrto_ 0.00100 ; # 1ms
+#  Agent/TCP set tcpTick_ 0.000001
+#}
+
 if {[string compare $sourceAlg "DCTCP-Sack"] == 0} {
 	Agent/TCP set dctcp_ true
 	Agent/TCP set dctcp_g_ $DCTCP_g
@@ -101,7 +102,11 @@ Queue/WFQ set queue_num_ $service_num
 Queue/WFQ set dequeue_ecn_marking_ 0
 Queue/WFQ set mean_pktsize_ $pktSize
 Queue/WFQ set port_thresh_ $DCTCP_K
-Queue/WFQ set marking_scheme_ $ECN_scheme
+if {$ECN_scheme<=2} {
+	Queue/WFQ set marking_scheme_ $ECN_scheme
+} else {
+	Queue/WFQ set marking_scheme_ 0
+}
 
 Queue/RED set bytes_ false
 Queue/RED set queue_in_bytes_ true
@@ -151,9 +156,9 @@ for {set i 0} {$i < $S} {incr i} {
 	set L [$ns link $s($i) $n($j)] 
 	set q [$L set queue_]
 	for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-		$q set-weight $service_i 1000000
+		$q set-weight $service_i $weight 
 		
-		if {$ECN_scheme==2} {
+		if {$ECN_scheme==2||$ECN_scheme==3} {
 			$q set-thresh $service_i [expr $DCTCP_K/$service_num]
 		} else {
 			$q set-thresh $service_i [expr $DCTCP_K] 
@@ -163,9 +168,9 @@ for {set i 0} {$i < $S} {incr i} {
 	set L [$ns link $n($j) $s($i)] 
 	set q [$L set queue_]
 	for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-		$q set-weight $service_i 1000000
+		$q set-weight $service_i $weight
 		
-		if {$ECN_scheme==2} {
+		if {$ECN_scheme==2||$ECN_scheme==3} {
 			$q set-thresh $service_i [expr $DCTCP_K/$service_num]
 		} else {
 			$q set-thresh $service_i [expr $DCTCP_K] 
@@ -182,8 +187,8 @@ for {set i 0} {$i < $topology_tors} {incr i} {
 		set L [$ns link $n($i) $a($j)] 
 		set q [$L set queue_]
 		for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-			$q set-weight $service_i 100000
-			if {$ECN_scheme==2} {
+			$q set-weight $service_i $weight
+			if {$ECN_scheme==2||$ECN_scheme==3} {
 				$q set-thresh $service_i [expr $DCTCP_K/$service_num]
 			} else {
 				$q set-thresh $service_i [expr $DCTCP_K] 
@@ -193,8 +198,8 @@ for {set i 0} {$i < $topology_tors} {incr i} {
 		set L [$ns link $a($j) $n($i)] 
 		set q [$L set queue_]
 		for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-			$q set-weight $service_i 100000
-			if {$ECN_scheme==2} {
+			$q set-weight $service_i $weight
+			if {$ECN_scheme==2||$ECN_scheme==3} {
 				$q set-thresh $service_i [expr $DCTCP_K/$service_num]
 			} else {
 				$q set-thresh $service_i [expr $DCTCP_K] 
@@ -215,7 +220,7 @@ puts "Setting up connections ..."; flush stdout
 set flow_gen 0
 set flow_fin 0
 
-set flowlog [open flow.tr w]
+set flowlog [open $fct_log w]
 set init_fid 0
 for {set j 0} {$j < $S } {incr j} {
     for {set i 0} {$i < $S } {incr i} {
