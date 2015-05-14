@@ -5,8 +5,8 @@
 #include "config.h"
 #include "trace.h"
 
-/*We can use 8 queuess at most */
-#define WFQ_MAX_QUEUES 8	
+/*We can use 32 queuess at most */
+#define WFQ_MAX_QUEUES 32	
 
 /* Per-queue ECN marking */
 #define PER_QUEUE_MARKING 0

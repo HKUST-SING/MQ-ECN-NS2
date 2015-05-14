@@ -4,47 +4,48 @@ set ns [new Simulator]
 set sim_start [clock seconds]
 puts "Host: [exec uname -a]"
 
-if {$argc != 23} {
+if {$argc != 24} {
     puts "wrong number of arguments $argc"
     exit 0
 }
 
-set sim_end [lindex $argv 0]
-set link_rate [lindex $argv 1]
-set mean_link_delay [lindex $argv 2]
-set host_delay [lindex $argv 3]
-set queueSize [lindex $argv 4]
-set load [lindex $argv 5]
-set connections_per_pair [lindex $argv 6]
-set meanFlowSize [lindex $argv 7]
-set paretoShape [lindex $argv 8]
+set service_num [lindex $argv 0]
+set sim_end [lindex $argv 1]
+set link_rate [lindex $argv 2]
+set mean_link_delay [lindex $argv 3]
+set host_delay [lindex $argv 4]
+set queueSize [lindex $argv 5]
+set load [lindex $argv 6]
+set connections_per_pair [lindex $argv 7]
+set meanFlowSize [lindex $argv 8]
+set paretoShape [lindex $argv 9]
 #### Multipath
-set enableMultiPath [lindex $argv 9]
-set perflowMP [lindex $argv 10]
+set enableMultiPath [lindex $argv 10]
+set perflowMP [lindex $argv 11]
 #### Transport settings options
-set sourceAlg [lindex $argv 11] ; # Sack or DCTCP-Sack
-set ackRatio [lindex $argv 12]
-set slowstartrestart [lindex $argv 13]
-set DCTCP_g [lindex $argv 14] ; # DCTCP alpha estimation gain
-set min_rto [lindex $argv 15]
+set sourceAlg [lindex $argv 12] ; # Sack or DCTCP-Sack
+set ackRatio [lindex $argv 13]
+set slowstartrestart [lindex $argv 14]
+set DCTCP_g [lindex $argv 15] ; # DCTCP alpha estimation gain
+set min_rto [lindex $argv 16]
 #### Switch side options
-set ECN_scheme [lindex $argv 16]; #per-queue standard (0), per-port (1), our smart algorithm (2) and per-queue min (3)
-set DCTCP_K [lindex $argv 17]
+set ECN_scheme [lindex $argv 17]; #per-queue standard (0), per-port (1), our smart algorithm (2) and per-queue min (3)
+set DCTCP_K [lindex $argv 18]
 #### topology
-set topology_spt [lindex $argv 18]
-set topology_tors [lindex $argv 19]
-set topology_spines [lindex $argv 20]
-set topology_x [lindex $argv 21]
+set topology_spt [lindex $argv 19]
+set topology_tors [lindex $argv 20]
+set topology_spines [lindex $argv 21]
+set topology_x [lindex $argv 22]
 #### FCT log file
-set fct_log [lindex $argv 22]
+set fct_log [lindex $argv 23]
 
 set pktSize 1460; #packet size in bytes
-set service_num 8; #service queue number
 set weight 1000000
 
 puts "Simulation input:" 
 puts "Dynamic Flow - Pareto"
 puts "topology: spines server per rack = $topology_spt, x = $topology_x"
+puts "service number $service_num"
 puts "sim_end $sim_end"
 puts "link_rate $link_rate Gbps"
 puts "link_delay $mean_link_delay sec"
@@ -57,7 +58,6 @@ puts "enableMultiPath=$enableMultiPath, perflowMP=$perflowMP"
 puts "source algorithm: $sourceAlg"
 puts "ackRatio $ackRatio"
 puts "DCTCP_g $DCTCP_g"
-#puts "HR-Timer $enableHRTimer"
 puts "slow-start Restart $slowstartrestart"
 puts "ECN marking scheme $ECN_scheme"
 puts "DCTCP_K_ $DCTCP_K"

@@ -101,7 +101,7 @@ int WFQ::MarkingECN(int q)
 			/* Find all 'busy' (backlogged) queues and get the sum of their weights */
 			for(int i=0;i<min(queue_num_,WFQ_MAX_QUEUES);i++)
 			{
-				if(qs[i].q_->length()>1)
+				if(qs[i].q_->byteLength()>=2*mean_pktsize_)
 					weights+=qs[i].weight;
 			}
 	
