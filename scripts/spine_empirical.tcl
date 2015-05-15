@@ -4,7 +4,7 @@ set ns [new Simulator]
 set sim_start [clock seconds]
 puts "Host: [exec uname -a]"
 
-if {$argc != 24} {
+if {$argc != 25} {
     puts "wrong number of arguments $argc"
     exit 0
 }
@@ -36,8 +36,10 @@ set topology_spt [lindex $argv 19]
 set topology_tors [lindex $argv 20]
 set topology_spines [lindex $argv 21]
 set topology_x [lindex $argv 22]
+#### Flow size distribution CDF file
+set flow_cdf [lindex $argv 23]
 #### FCT log file
-set fct_log [lindex $argv 23]
+set fct_log [lindex $argv 24]
 
 set pktSize 1460; #packet size in bytes
 set weight 1000000
@@ -65,6 +67,7 @@ puts "pktSize(payload) $pktSize Bytes"
 puts "pktSize(include header) [expr $pktSize + 40] Bytes"
 puts "service number $service_num"
 puts "FCT log file $fct_log"
+puts "Flow size distribution CDF file $flow_cdf"
 puts " "
 
 ################# Transport Options ####################
@@ -234,7 +237,7 @@ for {set j 0} {$j < $S } {incr j} {
 
 		puts -nonewline "($i,$j) service $service_id"
 		#For Poisson/Pareto
-		$agtagr($i,$j) set_PCarrival_process  [expr $lambda/($S - 1)] "CDF_dctcp.tcl" [expr 17*$i+1244*$j] [expr 33*$i+4369*$j]
+		$agtagr($i,$j) set_PCarrival_process  [expr $lambda/($S - 1)] $flow_cdf [expr 17*$i+1244*$j] [expr 33*$i+4369*$j]
 		#$ns at 0.1 "$agtagr($i,$j) warmup 0.5 5"
 		$ns at 1 "$agtagr($i,$j) init_schedule"
 	    

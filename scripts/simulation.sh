@@ -1,1 +1,0 @@
-/home/wei/buffer_management/ns-allinone-2.35/ns-2.35/ns spine_empirical_dctcp.tcl 10000 10 0.0000002 0.000020 200 0.8 1 1661480 1.05 1 1 DCTCP-Sack 1 true 0.0625 0.005 0 72 16 9 4 1 >logFile.tr 
