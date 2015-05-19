@@ -29,7 +29,9 @@ set slowstartrestart [lindex $argv 14]
 set DCTCP_g [lindex $argv 15] ; # DCTCP alpha estimation gain
 set min_rto [lindex $argv 16]
 #### Switch side options
-set ECN_scheme [lindex $argv 17]; #per-queue standard (0), per-port (1), our smart algorithm (2) and per-queue min (3)
+#per-queue standard (0), per-port (1), our dynamic per-queue algorithm (2), 
+#our dynamic hybrid algorithm (3) and per-queue min (4)
+set ECN_scheme [lindex $argv 17]
 set DCTCP_K [lindex $argv 18]
 #### topology
 set topology_spt [lindex $argv 19]
@@ -105,9 +107,11 @@ Queue/WFQ set queue_num_ $service_num
 Queue/WFQ set dequeue_ecn_marking_ 0
 Queue/WFQ set mean_pktsize_ $pktSize
 Queue/WFQ set port_thresh_ $DCTCP_K
-if {$ECN_scheme<=2} {
+
+if {$ECN_scheme!=4} {
 	Queue/WFQ set marking_scheme_ $ECN_scheme
 } else {
+	#Per-queue-min 
 	Queue/WFQ set marking_scheme_ 0
 }
 
@@ -161,7 +165,8 @@ for {set i 0} {$i < $S} {incr i} {
 	for {set service_i 0} {$service_i < $service_num} {incr service_i} {
 		$q set-weight $service_i $weight 
 		
-		if {$ECN_scheme==2||$ECN_scheme==3} {
+		#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
+		if {$ECN_scheme>=2} {
 			$q set-thresh $service_i [expr $DCTCP_K/$service_num]
 		} else {
 			$q set-thresh $service_i [expr $DCTCP_K] 
@@ -173,7 +178,8 @@ for {set i 0} {$i < $S} {incr i} {
 	for {set service_i 0} {$service_i < $service_num} {incr service_i} {
 		$q set-weight $service_i $weight
 		
-		if {$ECN_scheme==2||$ECN_scheme==3} {
+		#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
+		if {$ECN_scheme>=2} {
 			$q set-thresh $service_i [expr $DCTCP_K/$service_num]
 		} else {
 			$q set-thresh $service_i [expr $DCTCP_K] 
@@ -191,7 +197,8 @@ for {set i 0} {$i < $topology_tors} {incr i} {
 		set q [$L set queue_]
 		for {set service_i 0} {$service_i < $service_num} {incr service_i} {
 			$q set-weight $service_i $weight
-			if {$ECN_scheme==2||$ECN_scheme==3} {
+			#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
+			if {$ECN_scheme>=2} {
 				$q set-thresh $service_i [expr $DCTCP_K/$service_num]
 			} else {
 				$q set-thresh $service_i [expr $DCTCP_K] 
@@ -202,7 +209,8 @@ for {set i 0} {$i < $topology_tors} {incr i} {
 		set q [$L set queue_]
 		for {set service_i 0} {$service_i < $service_num} {incr service_i} {
 			$q set-weight $service_i $weight
-			if {$ECN_scheme==2||$ECN_scheme==3} {
+			#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
+			if {$ECN_scheme>=2} {
 				$q set-thresh $service_i [expr $DCTCP_K/$service_num]
 			} else {
 				$q set-thresh $service_i [expr $DCTCP_K] 

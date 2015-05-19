@@ -12,8 +12,10 @@
 #define PER_QUEUE_MARKING 0
 /* Per-port ECN marking */
 #define PER_PORT_MARKING 1
-/* Our smart hybrid ECN marking scheme */
-#define SMART_MARKING 2
+/* Our dynamic per-queue-based ECN marking scheme */
+#define QUEUE_SMART_MARKING 2
+/* Our dynamic hybrid (per-queue+per-port) ECN marking scheme */
+#define HYBRID_SMRT_MARKING 3
 
 struct QueueState
 {

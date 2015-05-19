@@ -12,7 +12,7 @@ class SimThread(threading.Thread):
 		os.system('mkdir '+self.directory_name)
 		os.system(self.cmd)
 
-service_num_arr=[4]		
+service_num_arr=[4,8,16,32]		
 sim_end=50000
 link_rate=10
 mean_link_delay=0.0000002
@@ -24,13 +24,13 @@ meanFlowSize=1661480
 paretoShape=1.05
 enableMultiPath=1
 perflowMP=1
-sourceAlg='Sack' 
+sourceAlg='DCTCP-Sack' 
 ackRatio=1
 slowstartrestart='true'
 DCTCP_g=0.0625
 min_rto=0.005
-ECN_scheme_arr=[0,2,3]
-DCTCP_K=84
+ECN_scheme_arr=[3]
+DCTCP_K=65
 topology_spt=16
 topology_tors=9
 topology_spines=4
@@ -41,7 +41,7 @@ sim_script='spine_empirical.tcl'
 flow_cdf='CDF_dctcp.tcl'
 
 threads=[]
-max_thread_num=16
+max_thread_num=18
 
 #For different numbers of queues (services):
 for service_num in service_num_arr:

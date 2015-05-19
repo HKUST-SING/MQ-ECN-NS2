@@ -24,13 +24,13 @@ meanFlowSize=5117*1460
 paretoShape=1.05
 enableMultiPath=1
 perflowMP=1
-sourceAlg='DCTCP-Sack' 
+sourceAlg='Sack' 
 ackRatio=1
 slowstartrestart='true'
 DCTCP_g=0.0625
 min_rto=0.005
-ECN_scheme_arr=[0,2,3]
-DCTCP_K=65
+ECN_scheme_arr=[3]
+DCTCP_K=84
 topology_spt=16
 topology_tors=9
 topology_spines=4
@@ -41,7 +41,7 @@ sim_script='spine_empirical.tcl'
 flow_cdf='CDF_vl2.tcl'
 
 threads=[]
-max_thread_num=22
+max_thread_num=18
 
 #For different numbers of queues (services):
 for service_num in service_num_arr:

@@ -89,11 +89,17 @@ int WFQ::MarkingECN(int q)
 		else
 			return 0;
 	}
-	/* Our smart hybrid ECN marking scheme */
-	else if(marking_scheme_==SMART_MARKING)
+	/* Our new ECN marking schemes (QUEUE_SMART_MARKING or HYBRID_SMRT_MARKING)*/
+	else if(marking_scheme_==QUEUE_SMART_MARKING||marking_scheme_==HYBRID_SMRT_MARKING)
 	{	
-		/* We only do ECN marking when per-queue buffer occupation exceeds the pre-defined threshold */ 
-		if(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_)//&&TotalByteLength()>=port_thresh_*mean_pktsize_)
+		/* For QUEUE_SMART_MARKING, we calculate ECN thresholds when:
+		  * 		1. per-queue buffer occupation exceeds a pre-defined threshold 
+		 *  For HYBRID_SMRT_MARKING, we calculate ECN thresholds when:
+		 *			1. per-port buffer occupation exceeds a pre-defined threshold for 
+		 *			2. per-queue buffer occupation also exceeds a pre-defined threshold
+		 */ 
+		if((qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_&&marking_scheme_==QUEUE_SMART_MARKING)||
+		(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_&&TotalByteLength()>=port_thresh_*mean_pktsize_&&marking_scheme_==HYBRID_SMRT_MARKING))
 		{
 			double weights=0;
 			double thresh=0;
