@@ -12,8 +12,8 @@ class SimThread(threading.Thread):
 		os.system('mkdir '+self.directory_name)
 		os.system(self.cmd)
 
-service_num_arr=[4,8,16,32]		
-sim_end=50000
+service_num_arr=[8,32]		
+sim_end=100000
 link_rate=10
 mean_link_delay=0.0000002
 host_delay=0.000020
@@ -29,8 +29,8 @@ ackRatio=1
 slowstartrestart='true'
 DCTCP_g=0.0625
 min_rto=0.005
-ECN_scheme_arr=[3]
-DCTCP_K=65
+ECN_scheme_arr=[0,2,3,4]
+DCTCP_K=65.0
 topology_spt=16
 topology_tors=9
 topology_spines=4

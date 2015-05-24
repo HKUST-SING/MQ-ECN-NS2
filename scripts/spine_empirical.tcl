@@ -26,7 +26,7 @@ set perflowMP [lindex $argv 11]
 set sourceAlg [lindex $argv 12] ; # Sack or DCTCP-Sack
 set ackRatio [lindex $argv 13]
 set slowstartrestart [lindex $argv 14]
-set DCTCP_g [lindex $argv 15] ; # DCTCP alpha estimation gain
+set DCTCP_g [lindex $argv 15] ;	# DCTCP alpha estimation gain
 set min_rto [lindex $argv 16]
 #### Switch side options
 #per-queue standard (0), per-port (1), our dynamic per-queue algorithm (2), 
@@ -43,8 +43,8 @@ set flow_cdf [lindex $argv 23]
 #### FCT log file
 set fct_log [lindex $argv 24]
 
-set pktSize 1460; #packet size in bytes
-set weight 1000000
+set pktSize 1460;	#packet size in bytes
+set quantum 128;	#quantum for each queue
 
 puts "Simulation input:" 
 puts "Dynamic Flow - Pareto"
@@ -103,27 +103,17 @@ if {[string compare $sourceAlg "DCTCP-Sack"] == 0} {
 
 ################# Switch Options ######################
 Queue set limit_ $queueSize
-Queue/WFQ set queue_num_ $service_num
-Queue/WFQ set dequeue_ecn_marking_ 0
-Queue/WFQ set mean_pktsize_ $pktSize
-Queue/WFQ set port_thresh_ $DCTCP_K
+Queue/DWRR set queue_num_ $service_num
+Queue/DWRR set mean_pktsize_ [expr $pktSize+40]
+Queue/DWRR set port_thresh_ $DCTCP_K
+Queue/DWRR set backlogged_in_bytes_ 0
 
 if {$ECN_scheme!=4} {
-	Queue/WFQ set marking_scheme_ $ECN_scheme
+	Queue/DWRR set marking_scheme_ $ECN_scheme
 } else {
 	#Per-queue-min 
-	Queue/WFQ set marking_scheme_ 0
+	Queue/DWRR set marking_scheme_ 0
 }
-
-Queue/RED set bytes_ false
-Queue/RED set queue_in_bytes_ true
-Queue/RED set mean_pktsize_ $pktSize
-Queue/RED set setbit_ true
-Queue/RED set gentle_ false
-Queue/RED set q_weight_ 1.0
-Queue/RED set mark_p_ 1.0
-Queue/RED set thresh_ $DCTCP_K
-Queue/RED set maxthresh_ $DCTCP_K
 
 ############## Multipathing ###########################
 
@@ -156,14 +146,14 @@ for {set i 0} {$i < $topology_spines} {incr i} {
 
 for {set i 0} {$i < $S} {incr i} {
     set j [expr $i/$topology_spt]
-    $ns duplex-link $s($i) $n($j) [set link_rate]Gb [expr $host_delay + $mean_link_delay]  WFQ   
+    $ns duplex-link $s($i) $n($j) [set link_rate]Gb [expr $host_delay + $mean_link_delay]  DWRR   
 	
-##### Configure WFQ weights #####
+##### Configure DWRR #####
 	
 	set L [$ns link $s($i) $n($j)] 
 	set q [$L set queue_]
 	for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-		$q set-weight $service_i $weight 
+		$q set-quantum $service_i $quantum 
 		
 		#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
 		if {$ECN_scheme>=2} {
@@ -176,7 +166,7 @@ for {set i 0} {$i < $S} {incr i} {
 	set L [$ns link $n($j) $s($i)] 
 	set q [$L set queue_]
 	for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-		$q set-weight $service_i $weight
+		$q set-quantum $service_i $quantum
 		
 		#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
 		if {$ECN_scheme>=2} {
@@ -189,14 +179,14 @@ for {set i 0} {$i < $S} {incr i} {
 
 for {set i 0} {$i < $topology_tors} {incr i} {
     for {set j 0} {$j < $topology_spines} {incr j} {
-	$ns duplex-link $n($i) $a($j) [set UCap]Gb $mean_link_delay WFQ 
+	$ns duplex-link $n($i) $a($j) [set UCap]Gb $mean_link_delay DWRR 
 	
-##### Configure WFQ weights #####
+##### Configure DWRR #####
 	
 		set L [$ns link $n($i) $a($j)] 
 		set q [$L set queue_]
 		for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-			$q set-weight $service_i $weight
+			$q set-quantum $service_i $quantum
 			#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
 			if {$ECN_scheme>=2} {
 				$q set-thresh $service_i [expr $DCTCP_K/$service_num]
@@ -208,7 +198,7 @@ for {set i 0} {$i < $topology_tors} {incr i} {
 		set L [$ns link $a($j) $n($i)] 
 		set q [$L set queue_]
 		for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-			$q set-weight $service_i $weight
+			$q set-quantum $service_i $quantum
 			#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
 			if {$ECN_scheme>=2} {
 				$q set-thresh $service_i [expr $DCTCP_K/$service_num]
