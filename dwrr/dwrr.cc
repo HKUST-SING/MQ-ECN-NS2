@@ -8,6 +8,53 @@
 #define max(arg1,arg2) (arg1>arg2 ? arg1 : arg2)
 #define min(arg1,arg2) (arg1<arg2 ? arg1 : arg2)
 
+/* Insert a queue to the tail of an active list. Return true if insert succeeds */
+static void InsertTailList(PacketDWRR* list, PacketDWRR *q)
+{
+	if(q!=NULL && list !=NULL)
+	{
+		PacketDWRR* tmp=list;
+		while(true)
+		{
+			/* Arrive at the tail of this list */
+			if(tmp->next==NULL)
+			{
+				tmp->next=q;
+				q->next=NULL;
+				return;
+			}
+			/* Move to next node */
+			else
+			{
+				tmp=tmp->next;
+			}
+		}
+	}
+}
+
+/* Remove and return the head node from the active list */
+static PacketDWRR* RemoveHeadList(PacketDWRR* list)
+{
+	if(list!=NULL)
+	{
+		PacketDWRR* tmp=list->next;
+		if(tmp!=NULL)
+		{
+			list->next=tmp->next;
+			return tmp;
+		}
+		/* This list is empty */
+		else
+		{
+			return NULL;
+		}
+	}
+	else
+	{
+		return NULL;
+	}
+}
+
 static class DWRRClass : public TclClass 
 {
 	public:
@@ -19,46 +66,39 @@ static class DWRRClass : public TclClass
 } class_dwrr;
 
 DWRR::DWRR()
-{
+{	
+	queue_num_=32;
+	mean_pktsize_=1500;
+	port_thresh_=65;
+	marking_scheme_=0;
+	
+	queues=new PacketDWRR[MAX_QUEUE_NUM];
+	activeList=new PacketDWRR();
+	
+	total_qlen_tchan_=NULL;
+	qlen_tchan_=NULL;
+	
 	/* bind variables */
 	bind("queue_num_", &queue_num_);
 	bind("mean_pktsize_", &mean_pktsize_);
 	bind("port_thresh_",&port_thresh_);
 	bind("marking_scheme_",&marking_scheme_);
-	bind("backlogged_in_bytes_",&backlogged_in_bytes_);
-	
-	turn=0;
-	total_qlen_tchan_=NULL;
-	qlen_tchan_=NULL;
-	
-	/* Initialize queue states */
-	qs=new QueueState[DWRR_MAX_QUEUES];
-	for(int i=0;i<DWRR_MAX_QUEUES;i++)
-	{
-		qs[i].q_=new PacketQueue;
-		//By default, quantum is 100
-		qs[i].quantum=100;
-		qs[i].deficitCounter=0;
-		qs[i].thresh=0.0;
-	}
+	bind_bool("backlogged_in_bytes_",&backlogged_in_bytes_);
 }
 
 DWRR::~DWRR() 
 {
-	for(int i=0;i<DWRR_MAX_QUEUES;i++)
-	{
-		delete[] qs[i].q_;
-	}
-	delete[] qs;
+	delete activeList;
+	delete [] queues;
 }
 
 /* Get total length of all queues in bytes */
 int DWRR::TotalByteLength()
 {
 	int result=0;
-	for(int i=0;i<DWRR_MAX_QUEUES;i++)
+	for(int i=0;i<queue_num_;i++)
 	{
-		result+=qs[i].q_->byteLength();
+		result+=queues[i].byteLength();
 	}
 	return result;
 }
@@ -66,7 +106,7 @@ int DWRR::TotalByteLength()
 /* Determine whether we need to mark ECN where q is current queue number. Return 1 if it requires marking */
 int DWRR::MarkingECN(int q)
 {	
-	if(q<0||q>=min(queue_num_,DWRR_MAX_QUEUES))
+	if(q<0||q>=queue_num_)
 	{
 		fprintf (stderr,"illegal queue number\n");
 		exit (1);
@@ -75,7 +115,7 @@ int DWRR::MarkingECN(int q)
 	/* Per-queue ECN marking */
 	if(marking_scheme_==PER_QUEUE_MARKING)
 	{
-		if(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_)
+		if(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_)
 			return 1;
 		else
 			return 0;
@@ -97,28 +137,28 @@ int DWRR::MarkingECN(int q)
 		 *			1. per-port buffer occupation exceeds a pre-defined threshold for 
 		 *			2. per-queue buffer occupation also exceeds a pre-defined threshold
 		 */ 
-		if((qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_&&marking_scheme_==QUEUE_SMART_MARKING)||
-		(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_&&TotalByteLength()>=port_thresh_*mean_pktsize_&&marking_scheme_==HYBRID_SMRT_MARKING))
+		if((queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&marking_scheme_==QUEUE_SMART_MARKING)||
+		(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&TotalByteLength()>=port_thresh_*mean_pktsize_&&marking_scheme_==HYBRID_SMRT_MARKING))
 		{
 			int quantum_sum=0;
 			double thresh=0;
 		
 			/* Find all backlogged queues and get the sum of their quantum */
-			for(int i=0;i<min(queue_num_,DWRR_MAX_QUEUES);i++)
+			for(int i=0;i<queue_num_;i++)
 			{
 				/* Determine whether a queue is backlogged: 
 				 * if backlogged_in_bytes_ is set, qlen_in_bytes>=2*MTU
 				 * otherwise, qlen_in_pkts>=2
 				 */
-				if((backlogged_in_bytes_==1&&qs[i].q_->byteLength()>=2*mean_pktsize_)||
-				(backlogged_in_bytes_==0&&qs[i].q_->length()>=2))
-					quantum_sum+=qs[i].quantum;
+				if((backlogged_in_bytes_&&queues[i].byteLength()>=2*mean_pktsize_)||
+				(!backlogged_in_bytes_&&queues[i].length()>=2))
+					quantum_sum+=queues[i].quantum;
 			}
 	
 			if(quantum_sum>0)
 			{
-				thresh=qs[q].quantum*port_thresh_/quantum_sum;
-				if(qs[q].q_->byteLength()>=thresh*mean_pktsize_)
+				thresh=queues[q].quantum*port_thresh_/quantum_sum;
+				if(queues[q].byteLength()>=thresh*mean_pktsize_)
 					return 1;
 				else 
 					return 0;
@@ -187,12 +227,12 @@ int DWRR::command(int argc, const char*const* argv)
 		if (strcmp(argv[1], "set-quantum")==0) 
 		{
 			int queue_id=atoi(argv[2]);
-			if(queue_id<min(queue_num_,DWRR_MAX_QUEUES)&&queue_id>=0)
+			if(queue_id<queue_num_&&queue_id>=0)
 			{
 				int quantum=atoi(argv[3]);
 				if(quantum>0)
 				{
-					qs[queue_id].quantum=quantum;
+					queues[queue_id].quantum=quantum;
 					return (TCL_OK);
 				}
 				else
@@ -211,12 +251,12 @@ int DWRR::command(int argc, const char*const* argv)
 		else if(strcmp(argv[1], "set-thresh")==0)
 		{
 			int queue_id=atoi(argv[2]);
-			if(queue_id<min(queue_num_,DWRR_MAX_QUEUES)&&queue_id>=0)
+			if(queue_id<queue_num_&&queue_id>=0)
 			{
 				double thresh=atof(argv[3]);
 				if(thresh>=0)
 				{
-					qs[queue_id].thresh=thresh;
+					queues[queue_id].thresh=thresh;
 					return (TCL_OK);
 				}
 				else
@@ -244,7 +284,9 @@ void DWRR::enque(Packet *p)
 	hdr_flags* hf=hdr_flags::access(p);
 	int pktSize=hdr_cmn::access(p)->size();
 	int qlimBytes=qlim_*mean_pktsize_;
-		
+	
+	queue_num_=min(queue_num_,MAX_QUEUE_NUM);
+	
 	/* The shared buffer is overfilld */
 	if(TotalByteLength()+pktSize>qlimBytes)
 	{
@@ -253,8 +295,8 @@ void DWRR::enque(Packet *p)
 		return;
 	}
 	
-	if(prio>=min(queue_num_,DWRR_MAX_QUEUES)&&prio>0)
-		prio=min(queue_num_,DWRR_MAX_QUEUES)-1;
+	if(prio>=queue_num_||prio<0)
+		prio=queue_num_-1;
 	
 	/* Enqueue ECN marking */
 	if(MarkingECN(prio)>0&&hf->ect())
@@ -262,54 +304,70 @@ void DWRR::enque(Packet *p)
 	
 	//For debug
 	//printf ("enque to %d\n", prio);
-	qs[prio].q_->enque(p); 		
+	
+	/* if queues[prio] is not in activeList */
+	if(queues[prio].active==false)
+	{
+		queues[prio].deficitCounter=0;
+		queues[prio].active=true;
+		InsertTailList(activeList, &queues[prio]);
+		//printf("Insert to activeList\n");
+	}
+	
+	queues[prio].enque(p); 		
 	trace_qlen();
 	trace_total_qlen();
 }
 
 Packet *DWRR::deque(void)
 {
+	PacketDWRR *headNode=NULL;
 	Packet *pkt=NULL;
 	Packet *headPkt=NULL;
 	int pktSize;
 	
-	/*At least one queue is active */
+	/*At least one queue is active, activeList is not empty */
 	if(TotalByteLength()>0)
 	{
-		/* Given buffer is not empty, we must go through all actives queues and select a packet to dequeue */
+		//printf("Start scheduling\n");
+		/* We must go through all actives queues and select a packet to dequeue */
 		while(1)
 		{
-			/* if queue[turn] is not empty */
-			if(qs[turn].q_->length()>0)
+			headNode=activeList->next;	//Get head node from activeList					
+			if(headNode==NULL)
+				fprintf (stderr,"no active flow\n");
+			
+			/* if headNode is not empty */
+			if(headNode->length()>0)
 			{
-				qs[turn].deficitCounter+=qs[turn].quantum;
-				headPkt=qs[turn].q_->head();
+				headNode->deficitCounter+=headNode->quantum;
+				headPkt=headNode->head();
 				pktSize=hdr_cmn::access(headPkt)->size();
+				
 				/* if we have enough quantum to dequeue the head packet */
-				if(pktSize<=qs[turn].deficitCounter)
+				if(pktSize<=headNode->deficitCounter)
 				{
-					pkt=qs[turn].q_->deque();
-					qs[turn].deficitCounter-=pktSize;
-					/* After dequeue, queue[turn] becomes empty */
-					if(qs[turn].q_->length()==0)
+					pkt=headNode->deque();
+					headNode->deficitCounter-=pktSize;
+					//printf("deque a packet\n");
+					
+					/* After dequeue, headNode becomes empty queue */
+					if(headNode->length()==0)
 					{
-						qs[turn].deficitCounter=0;
-						turn=(turn+1)%min(queue_num_,DWRR_MAX_QUEUES);
+						headNode=RemoveHeadList(activeList);	//Remove head node from activeList
+						headNode->deficitCounter=0;
+						headNode->active=false;
 					}
 					break;
 				}
-				/* if we don't have enough quantum to dequeue packet from this queue, move to next queue */
+				/* if we don't have enough quantum to dequeue the head packet and the queue is not empty */
 				else
 				{
-					turn=(turn+1)%min(queue_num_,DWRR_MAX_QUEUES);
+					headNode=RemoveHeadList(activeList);	
+					InsertTailList(activeList, headNode);
 				}
 			}
-			/* if queue[turn] is empty, we should move to next queue */
-			else
-			{
-				turn=(turn+1)%min(queue_num_,DWRR_MAX_QUEUES);
-			}
-		}
+		}	
 	}
 	
 	return pkt;
@@ -344,9 +402,9 @@ void DWRR::trace_qlen()
 		wrk[n]=0; 
 		(void)Tcl_Write(qlen_tchan_, wrk, n);
 		
-		for(int i=0;i<min(queue_num_,DWRR_MAX_QUEUES); i++)
+		for(int i=0;i<queue_num_; i++)
 		{
-			sprintf(wrk, ", %d",qs[i].q_->byteLength());
+			sprintf(wrk, ", %d",queues[i].byteLength());
 			n=strlen(wrk);
 			wrk[n]=0; 
 			(void)Tcl_Write(qlen_tchan_, wrk, n);
