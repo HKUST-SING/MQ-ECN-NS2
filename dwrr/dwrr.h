@@ -22,11 +22,12 @@ class DWRR;
 class PacketDWRR: public PacketQueue
 {
 	public: 
-		PacketDWRR(): quantum(128),deficitCounter(0),thresh(0),active(false),next(NULL) {} 
+		PacketDWRR(): quantum(1500),deficitCounter(0),thresh(0),active(false),current(false),next(NULL) {} 
 		int quantum;	// quantum (weight) of this queue 
 		int deficitCounter;	//deficit counter for this queue 
 		double thresh;	// per-queue ECN marking threshold (pkts)
-		bool active;	//whether this queue is active 
+		bool active;	//whether this queue is active (qlen>0)
+		bool current;	//whether this queue is currently being served (deficitCounter has been updated for thie round)
 		PacketDWRR *next;	//pointer to next node
 		
 		friend class DWRR;

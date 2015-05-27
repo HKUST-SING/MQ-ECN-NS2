@@ -310,6 +310,7 @@ void DWRR::enque(Packet *p)
 	{
 		queues[prio].deficitCounter=0;
 		queues[prio].active=true;
+		queues[prio].current=false;
 		InsertTailList(activeList, &queues[prio]);
 		//printf("Insert to activeList\n");
 	}
@@ -340,7 +341,12 @@ Packet *DWRR::deque(void)
 			/* if headNode is not empty */
 			if(headNode->length()>0)
 			{
-				headNode->deficitCounter+=headNode->quantum;
+				/* headNode has not been served yet in this round */
+				if(headNode->current==false)
+				{
+					headNode->deficitCounter+=headNode->quantum;
+					headNode->current=true;
+				}
 				headPkt=headNode->head();
 				pktSize=hdr_cmn::access(headPkt)->size();
 				
@@ -357,6 +363,7 @@ Packet *DWRR::deque(void)
 						headNode=RemoveHeadList(activeList);	//Remove head node from activeList
 						headNode->deficitCounter=0;
 						headNode->active=false;
+						headNode->current=false;
 					}
 					break;
 				}
@@ -364,6 +371,7 @@ Packet *DWRR::deque(void)
 				else
 				{
 					headNode=RemoveHeadList(activeList);	
+					headNode->current=false;
 					InsertTailList(activeList, headNode);
 				}
 			}

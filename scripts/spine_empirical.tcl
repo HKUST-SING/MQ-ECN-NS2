@@ -44,7 +44,7 @@ set flow_cdf [lindex $argv 23]
 set fct_log [lindex $argv 24]
 
 set pktSize 1460;	#packet size in bytes
-set quantum 128;	#quantum for each queue
+set quantum [expr $pktSize+40];	#quantum for each queue
 
 puts "Simulation input:" 
 puts "Dynamic Flow - Pareto"
@@ -106,7 +106,7 @@ Queue set limit_ $queueSize
 Queue/DWRR set queue_num_ $service_num
 Queue/DWRR set mean_pktsize_ [expr $pktSize+40]
 Queue/DWRR set port_thresh_ $DCTCP_K
-Queue/DWRR set backlogged_in_bytes_ 0
+Queue/DWRR set backlogged_in_bytes_ false
 
 if {$ECN_scheme!=4} {
 	Queue/DWRR set marking_scheme_ $ECN_scheme
