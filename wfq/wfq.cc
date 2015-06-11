@@ -20,14 +20,19 @@ static class WFQClass : public TclClass
 
 WFQ::WFQ()
 {
+	queue_num_=32;
+	mean_pktsize_=1500;
+	port_thresh_=65;
+	marking_scheme_=0;
+	
 	/* bind variables */
 	bind("queue_num_", &queue_num_);
-	bind("dequeue_ecn_marking_", &dequeue_ecn_marking_);
 	bind("mean_pktsize_", &mean_pktsize_);
 	bind("port_thresh_",&port_thresh_);
 	bind("marking_scheme_",&marking_scheme_);
+	bind_bool("backlogged_in_bytes_",&backlogged_in_bytes_);
 
-	V=0.0;
+	currTime=0.0;
 	total_qlen_tchan_=NULL;
 	qlen_tchan_=NULL;
 	
@@ -36,11 +41,8 @@ WFQ::WFQ()
 	for(int i=0;i<WFQ_MAX_QUEUES;i++)
 	{
 		qs[i].q_=new PacketQueue;
-		//By default, weight is 10000
-		qs[i].weight=10000.0;
-		qs[i].S=0.0;
-		qs[i].F=0.0;
-		qs[i].thresh=0;
+		qs[i].weight=10000.0;	//By default, weight is 10000
+		qs[i].thresh=0.0;
 	}
 }
 
@@ -57,7 +59,7 @@ WFQ::~WFQ()
 int WFQ::TotalByteLength()
 {
 	int result=0;
-	for(int i=0;i<WFQ_MAX_QUEUES;i++)
+	for(int i=0;i<queue_num_;i++)
 	{
 		result+=qs[i].q_->byteLength();
 	}
@@ -67,7 +69,7 @@ int WFQ::TotalByteLength()
 /* Determine whether we need to mark ECN where q is current queue number. Return 1 if it requires marking */
 int WFQ::MarkingECN(int q)
 {	
-	if(q<0||q>=min(queue_num_,WFQ_MAX_QUEUES))
+	if(q<0||q>=queue_num_)
 	{
 		fprintf (stderr,"illegal queue number\n");
 		exit (1);
@@ -105,9 +107,14 @@ int WFQ::MarkingECN(int q)
 			double thresh=0;
 		
 			/* Find all 'busy' (backlogged) queues and get the sum of their weights */
-			for(int i=0;i<min(queue_num_,WFQ_MAX_QUEUES);i++)
+			for(int i=0;i<queue_num_;i++)
 			{
-				if(qs[i].q_->byteLength()>=2*mean_pktsize_)
+				/* Determine whether a queue is backlogged: 
+				 * if backlogged_in_bytes_ is set, qlen_in_bytes>=2*MTU
+				 * otherwise, qlen_in_pkts>=2
+				 */
+				if((backlogged_in_bytes_&&qs[i].q_->byteLength()>=2*mean_pktsize_)||
+				(!backlogged_in_bytes_&&qs[i].q_->length()>=2))
 					weights+=qs[i].weight;
 			}
 	
@@ -207,7 +214,7 @@ int WFQ::command(int argc, const char*const* argv)
 		else if(strcmp(argv[1], "set-thresh")==0)
 		{
 			int queue_id=atoi(argv[2]);
-			if(queue_id<min(queue_num_,WFQ_MAX_QUEUES)&&queue_id>=0)
+			if(queue_id<queue_num_&&queue_id>=0)
 			{
 				int thresh=atoi(argv[3]);
 				if(thresh>=0)
@@ -249,19 +256,16 @@ void WFQ::enque(Packet *p)
 		return;
 	}
 	
-	if(prio>=min(queue_num_,WFQ_MAX_QUEUES)&&prio>0)
-		prio=min(queue_num_,WFQ_MAX_QUEUES)-1;
-	
-	//For debug
-	//printf ("enque to %d\n", prio);
-	
-	/* If queue for the flow is empty, calculate start and finish times */
+	if(prio>=queue_num_||prio<0)
+		prio=queue_num_-1;
+		
+	/* If queue for the flow is empty, calculate headFinishTime and currTime */
 	if(qs[prio].q_->length()==0)
 	{
-		qs[prio].S=max(V, qs[prio].F);
 		if(qs[prio].weight>0)
 		{
-			qs[prio].F=qs[prio].S+pktSize/qs[prio].weight;
+			qs[prio].headFinishTime=currTime+pktSize/qs[prio].weight ;
+			currTime=qs[prio].headFinishTime;
 		}
 		/* In theory, weight should never be zero or negative */
 		else
@@ -269,23 +273,12 @@ void WFQ::enque(Packet *p)
 			fprintf (stderr,"enqueue: illegal weight value for queue %d\n", prio);
 			exit(1);
 		}
-		
-		/* update system virutal clock */
-		long double minS = qs[prio].S;
-		for(int i=0;i<min(queue_num_,WFQ_MAX_QUEUES);i++)
-		{
-			if(qs[i].q_->length()>0&&minS>qs[i].S)
-				minS=qs[i].S;
-		}
-		V=max(minS, V);
 	}
 	
 	/* Enqueue ECN marking */
-	if(dequeue_ecn_marking_==0)
-	{
-		if(MarkingECN(prio)>0&&hf->ect())
-			hf->ce() = 1;
-	}
+	if(MarkingECN(prio)>0&&hf->ect())
+		hf->ce() = 1;
+	
 	qs[prio].q_->enque(p); 		
 	trace_qlen();
 	trace_total_qlen();
@@ -295,20 +288,20 @@ Packet *WFQ::deque(void)
 {
 	Packet *pkt=NULL, *nextPkt=NULL;
 	int i, pktSize;
-	long double minF=LDBL_MAX ;
+	long double minT=LDBL_MAX ;
 	int queue=-1;
-	double weight=0.0;
 	int tot_len=TotalByteLength();
 	
-	/* look for the candidate queue with the earliest finish time */
-	for(i=0; i<min(queue_num_,WFQ_MAX_QUEUES); i++)
+	/* look for the candidate queue with the earliest virtual finish time */
+	for(i=0; i<queue_num_; i++)
 	{
 		if (qs[i].q_->length()==0)
 			continue;
-		if (qs[i].F<minF)//qs[i].S<=V && qs[i].F<minF)
+		
+		if (qs[i].headFinishTime<minT)
 		{
 			queue=i;
-			minF=qs[i].F;
+			minT=qs[i].headFinishTime;
 		}
 	}
 	
@@ -320,21 +313,18 @@ Packet *WFQ::deque(void)
 		return NULL;
 	}
 	
-	//For debug
-	//printf ("deque from %d\n", queue);
-	
 	pkt=qs[queue].q_->deque();
 	pktSize=hdr_cmn::access(pkt)->size();
 	  
-	/* Set the start and the finish times of the remaining packets in the queue */
+	/* Set the headFinishTime for the remaining head packet in the queue */
 	nextPkt=qs[queue].q_->head();
 	if (nextPkt!=NULL) 
 	{
-		qs[queue].S=qs[queue].F;
 		if(qs[queue].weight>0)
 		{
-			qs[queue].S=qs[queue].F;
-			qs[queue].F=qs[queue].S+(hdr_cmn::access(nextPkt)->size())/qs[queue].weight;
+			qs[queue].headFinishTime=qs[queue].headFinishTime+(hdr_cmn::access(nextPkt)->size())/qs[queue].weight;
+			if(currTime<qs[queue].headFinishTime)
+				currTime=qs[queue].headFinishTime;
 		}
 		else
 		{
@@ -342,32 +332,12 @@ Packet *WFQ::deque(void)
 			exit(1);
 		}
 	}
-	
-	/* update the virtual clock */
-	long double minS = qs[queue].S;
-	for(int i=0;i<min(queue_num_,WFQ_MAX_QUEUES);i++)
+	/* No remaining packet in this queue */
+	else
 	{
-		weight+=qs[i].weight;
-		if(qs[i].q_->length()>0&&minS>qs[i].S)
-			minS=qs[i].S;
+		qs[queue].headFinishTime=LDBL_MAX;
 	}
-	if(weight>0)
-		V=max(minS, V+pktSize/weight);
-	
-	/* Dequeue ECN marking */
-	if(pkt!=NULL&&dequeue_ecn_marking_!=0)
-	{
-		hdr_flags* hf=hdr_flags::access(pkt);		
-		if(MarkingECN(queue)>0&&hf->ect()) 
-		{
-			hf->ce() = 1;
-		}
-	}
-	
-	//For debug. This should not happen
-	if(tot_len>0&&pkt==NULL)
-		fprintf (stderr,"not work conserving\n");
-	
+			
 	return pkt;
 }
 

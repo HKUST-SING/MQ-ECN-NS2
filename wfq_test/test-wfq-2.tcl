@@ -42,10 +42,10 @@ Agent/TCP/FullTcp set interval_ 0.04 ; #delayed ACK interval = 40ms
 
 Queue set limit_ 1000
 Queue/WFQ set queue_num_ 3
-Queue/WFQ set dequeue_ecn_marking_ 0
 Queue/WFQ set mean_pktsize_ $packetSize
 Queue/WFQ set port_thresh_ $K_port
 Queue/WFQ set marking_scheme_ $marking_schme
+Queue/WFQ set backlogged_in_bytes_ false
 
 set mytracefile [open mytracefile.tr w]
 $ns trace-all $mytracefile

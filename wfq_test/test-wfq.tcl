@@ -5,8 +5,8 @@ set service2_senders 2
 set K_port 80;	#The per-port ECN marking threshold
 set K_0 4; #The per-queue ECN marking threshold of the first queue
 set K_1 16; #The per-queue ECN marking threshold of the second queue
-set W_0 10000; #The weight of the first queue
-set W_1 40000; #The weight of the second queue
+set W_0 100000; #The weight of the first queue
+set W_1 400000; #The weight of the second queue
 set marking_schme 2
 
 set RTT 0.0001
@@ -35,10 +35,10 @@ Agent/TCP/FullTcp set interval_ 0.04 ; #delayed ACK interval = 40ms
 
 Queue set limit_ 1000
 Queue/WFQ set queue_num_ 2
-Queue/WFQ set dequeue_ecn_marking_ 0
 Queue/WFQ set mean_pktsize_ $packetSize
 Queue/WFQ set port_thresh_ $K_port
 Queue/WFQ set marking_scheme_ $marking_schme
+Queue/WFQ set backlogged_in_bytes_ false
 
 set mytracefile [open mytracefile.tr w]
 $ns trace-all $mytracefile
