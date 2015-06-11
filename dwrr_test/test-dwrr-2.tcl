@@ -11,9 +11,9 @@ set K_port 80;	#The per-port ECN marking threshold
 set K_0 10; #The per-queue ECN marking threshold of the first queue
 set K_1 10; #The per-queue ECN marking threshold of the second queue
 set K_2 10; #The per-queue ECN marking threshold of the third queue
-set W_0 40; #The weight of the first queue
-set W_1 40; #The weight of the second queue
-set W_2 40; #The weight of the third  queue
+set W_0 1500; #The weight of the first queue
+set W_1 1500; #The weight of the second queue
+set W_2 1500; #The weight of the third  queue
 set marking_schme 2
 
 set RTT 0.0001
@@ -45,7 +45,6 @@ Queue/DWRR set queue_num_ 3
 Queue/DWRR set mean_pktsize_ [expr $packetSize+40]
 Queue/DWRR set port_thresh_ $K_port
 Queue/DWRR set marking_scheme_ $marking_schme
-Queue/DWRR set backlogged_in_bytes_ 0
 
 set mytracefile [open mytracefile.tr w]
 $ns trace-all $mytracefile

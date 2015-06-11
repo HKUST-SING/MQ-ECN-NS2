@@ -7,6 +7,7 @@
 
 /*Maximum queue number */
 #define MAX_QUEUE_NUM 32
+
 /* Per-queue ECN marking */
 #define PER_QUEUE_MARKING 0
 /* Per-port ECN marking */
@@ -54,7 +55,6 @@ class DWRR : public Queue
 		int mean_pktsize_;	// MTU in bytes 
 		double port_thresh_;	// per-port ECN marking threshold (pkts)
 		int marking_scheme_;	// ECN marking policy 
-		int backlogged_in_bytes_;	// Backlogged conditions: >=two pkts (false) or two mean_pktsize_ (true)  
 		
 		Tcl_Channel total_qlen_tchan_;	// place to write total_qlen records 
 		Tcl_Channel qlen_tchan_;	// place to write per-queue qlen records 

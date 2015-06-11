@@ -83,7 +83,6 @@ DWRR::DWRR()
 	bind("mean_pktsize_", &mean_pktsize_);
 	bind("port_thresh_",&port_thresh_);
 	bind("marking_scheme_",&marking_scheme_);
-	bind_bool("backlogged_in_bytes_",&backlogged_in_bytes_);
 }
 
 DWRR::~DWRR() 
@@ -146,12 +145,8 @@ int DWRR::MarkingECN(int q)
 			/* Find all backlogged queues and get the sum of their quantum */
 			for(int i=0;i<queue_num_;i++)
 			{
-				/* Determine whether a queue is backlogged: 
-				 * if backlogged_in_bytes_ is set, qlen_in_bytes>=2*MTU
-				 * otherwise, qlen_in_pkts>=2
-				 */
-				if((backlogged_in_bytes_&&queues[i].byteLength()>=2*mean_pktsize_)||
-				(!backlogged_in_bytes_&&queues[i].length()>=2))
+				if((queues[i].current==false&&queues[i].byteLength()>=queues[i].quantum)	//queues[i] is not the head node 
+				||(queues[i].current==true&&queues[i].byteLength()>=queues[i].deficitCounter))	//queues[i] is the head node and being served now
 					quantum_sum+=queues[i].quantum;
 			}
 	
@@ -330,7 +325,6 @@ Packet *DWRR::deque(void)
 	/*At least one queue is active, activeList is not empty */
 	if(TotalByteLength()>0)
 	{
-		//printf("Start scheduling\n");
 		/* We must go through all actives queues and select a packet to dequeue */
 		while(1)
 		{
