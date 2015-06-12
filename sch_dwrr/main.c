@@ -20,7 +20,8 @@ struct dwrr_rate_cfg
 
 struct dwrr_class
 {
-	struct Qdisc	*qdisc;	//innet FIFO queue
+	int id; //id of this queue
+	struct Qdisc	*qdisc;	//inner FIFO queue
 	u32	quantum;	//quantum of this queue (bytes)
 	u32	deficitCounter;	//deficit counter of this queue (bytes)
 	u8 active;	//whether the queue is not ampty (1) or not (0)
@@ -114,6 +115,12 @@ static struct dwrr_class* dwrr_qdisc_classify(struct sk_buff *skb, struct Qdisc 
 		return &(q->queues[7]);
 }
 
+/* We don't need this */
+static struct sk_buff*dwrr_qdisc_peek(struct Qdisc *sch)
+{
+	return NULL;
+}
+
 static struct sk_buff* dwrr_qdisc_dequeue(struct Qdisc *sch)
 {
 	struct dwrr_sched_data *q = qdisc_priv(sch);	
@@ -139,14 +146,14 @@ static struct sk_buff* dwrr_qdisc_dequeue(struct Qdisc *sch)
 		}
 		
 		/* get head packet */
-		skb = cl->qdisc->ops->peek(cl->qdisc);
+		skb=cl->qdisc->ops->peek(cl->qdisc);
 		if(unlikely(skb==NULL)) 
 		{
 			qdisc_warn_nonwc(__func__, cl->qdisc);
 			return NULL;
 		}
 		
-		len=skb_size(skb);
+		len=skb_size(skb);		
 		/* If this packet can be scheduled by DWRR */
 		if(len<=cl->deficitCounter)
 		{
@@ -164,10 +171,8 @@ static struct sk_buff* dwrr_qdisc_dequeue(struct Qdisc *sch)
 				q->time_ns=now;
 				q->sum_len_bytes-=len;
 				sch->q.qlen--;
-				q->tokens=toks-pkt_ns;
-				//Bucket 
-				if(q->tokens>DWRR_QDISC_BUCKET_NS)
-					q->tokens=DWRR_QDISC_BUCKET_NS;
+				/* Bucket */
+				q->tokens=min_t(u64,toks-pkt_ns,DWRR_QDISC_BUCKET_NS);
 				
 				qdisc_unthrottled(sch);
 				qdisc_bstats_update(sch, skb);
@@ -179,6 +184,8 @@ static struct sk_buff* dwrr_qdisc_dequeue(struct Qdisc *sch)
 					cl->curr=0;
 					list_del(&cl->alist);
 				}
+				
+				printk(KERN_INFO "Dequeue from queue %d\n",cl->id);
 				return skb;
 			}
 			/* if we don't have enough tokens to realse this packet */
@@ -187,6 +194,7 @@ static struct sk_buff* dwrr_qdisc_dequeue(struct Qdisc *sch)
 				/* we use now+t due to absolute mode of hrtimer (HRTIMER_MODE_ABS) */
 				qdisc_watchdog_schedule_ns(&q->watchdog,now+pkt_ns-toks,true);
 				qdisc_qstats_overlimit(sch);
+				return NULL;
 			}
 		}
 		/* This packet can not be scheduled by DWRR */
@@ -219,6 +227,11 @@ static int dwrr_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	else
 	{
 		/* ECN marking */
+		if(cl->qdisc->q.qlen>=DWRR_QDISC_QUEUE_ECN_THRESH_PKTS)
+		{
+			//printk(KERN_INFO "ECN marking\n");
+			dwrr_qdisc_ecn(skb);
+		}
 		
 		ret=qdisc_enqueue(skb, cl->qdisc);
 		if(ret == NET_XMIT_SUCCESS) 
@@ -339,7 +352,8 @@ static int dwrr_qdisc_init(struct Qdisc *sch, struct nlattr *opt)
 		
 		/* Initialize variables for dwrr_class */
 		INIT_LIST_HEAD(&((q->queues[i]).alist));
-		(q->queues[i]).quantum=DWRR_QDISC_MTU_BYTES;
+		(q->queues[i]).id=i;
+		(q->queues[i]).quantum=(i+1)*DWRR_QDISC_MTU_BYTES;
 		(q->queues[i]).deficitCounter=0;
 		(q->queues[i]).active=0;
 		(q->queues[i]).curr=0;
@@ -354,11 +368,12 @@ static struct Qdisc_ops dwrr_qdisc_ops __read_mostly = {
 	.next = NULL,
 	.cl_ops = NULL,
 	.id = "tbf",
-	.priv_size = sizeof(struct dwrr_sched_data ),
+	.priv_size = sizeof(struct dwrr_sched_data),
 	.init = dwrr_qdisc_init,
 	.destroy = dwrr_qdisc_destroy,
 	.enqueue = dwrr_qdisc_enqueue,
 	.dequeue = dwrr_qdisc_dequeue,
+	.peek=dwrr_qdisc_peek,
 	.drop = dwrr_qdisc_drop,
 	.change = dwrr_qdisc_change,
 	.dump = dwrr_qdisc_dump,
@@ -369,7 +384,6 @@ static int __init dwrr_qdisc_module_init(void)
 {
 	//if(pias_qdisc_params_init()<0)
 	//	return -1;
-	
 	printk(KERN_INFO "sch_dwrr: start working\n");
 	return register_qdisc(&dwrr_qdisc_ops);
 }

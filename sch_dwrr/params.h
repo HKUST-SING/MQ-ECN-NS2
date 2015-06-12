@@ -14,10 +14,12 @@
 
 /* Per-port ECN marking threshold in bytes */
 int DWRR_QDISC_ECN_THRESH_BYTES=20*DWRR_QDISC_MTU_BYTES;
-/* Maximum sum of queue lenghs. It's similar to shared buffer per port on switches */
+/* Maximum sum of queue lengths. It's similar to total shared buffer per port on switches */
 int DWRR_QDISC_MAX_LEN_BYTES=1024*1024;
+/* Per queue ECN marking rhewshold */
+int DWRR_QDISC_QUEUE_ECN_THRESH_PKTS=1000;
 /* Bucket size in nanosecond */
-int DWRR_QDISC_BUCKET_NS=2000000; ; 
+int DWRR_QDISC_BUCKET_NS=200000 ; 
 
 /* DSCP value for different queues */
 int DWRR_QDISC_PRIO_DSCP_1=0;
