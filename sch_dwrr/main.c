@@ -22,10 +22,11 @@ struct dwrr_class
 {
 	int id; //id of this queue
 	struct Qdisc	*qdisc;	//inner FIFO queue
-	u32	quantum;	//quantum of this queue (bytes)
+	//u32	quantum;	//quantum of this queue (bytes)
 	u32	deficitCounter;	//deficit counter of this queue (bytes)
 	u8 active;	//whether the queue is not ampty (1) or not (0)
 	u8 curr;	//whether this queue is crr being served 
+	u32 len_bytes;	//queue length in bytes
 	
 	struct list_head alist;	//structure of active link list
 };
@@ -84,6 +85,7 @@ static inline void dwrr_qdisc_ecn(struct sk_buff *skb)
 
 static struct dwrr_class* dwrr_qdisc_classify(struct sk_buff *skb, struct Qdisc *sch)
 {
+	int i=0;
 	struct dwrr_sched_data *q = qdisc_priv(sch);	
 	struct iphdr* iph=ip_hdr(skb);
 	int dscp;
@@ -91,28 +93,18 @@ static struct dwrr_class* dwrr_qdisc_classify(struct sk_buff *skb, struct Qdisc 
 	if(unlikely(q->queues==NULL))
 		return NULL;
 	
-	/* Return the highest priority queue by default*/
+	/* Return queue[0] by default*/
 	if(unlikely(iph==NULL))
 		return &(q->queues[0]);
 
 	dscp=(const int)(iph->tos>>2);
-
-	if(dscp==DWRR_QDISC_PRIO_DSCP_1)
-		return &(q->queues[0]);
-	else if(dscp==DWRR_QDISC_PRIO_DSCP_2)
-		return &(q->queues[1]);
-	else if(dscp==DWRR_QDISC_PRIO_DSCP_3)
-		return &(q->queues[2]);
-	else if(dscp==DWRR_QDISC_PRIO_DSCP_4)
-		return &(q->queues[3]);
-	else if(dscp==DWRR_QDISC_PRIO_DSCP_5)
-		return &(q->queues[4]);
-	else if(dscp==DWRR_QDISC_PRIO_DSCP_6)
-		return &(q->queues[5]);
-	else if(dscp==DWRR_QDISC_PRIO_DSCP_7)
-		return &(q->queues[6]);
-	else 
-		return &(q->queues[7]);
+	for(i=0;i<DWRR_QDISC_MAX_QUEUES;i++)
+	{
+		if(dscp==DWRR_QDISC_CLASS_DSCP[i])
+			return &(q->queues[i]);
+	}
+	
+	return &(q->queues[0]);
 }
 
 /* We don't need this */
@@ -142,7 +134,7 @@ static struct sk_buff* dwrr_qdisc_dequeue(struct Qdisc *sch)
 		if(cl->curr==0)
 		{
 			cl->curr=1;
-			cl->deficitCounter+=cl->quantum;
+			cl->deficitCounter+=DWRR_QDISC_CLASS_QUANTUM[cl->id];
 		}
 		
 		/* get head packet */
@@ -170,7 +162,9 @@ static struct sk_buff* dwrr_qdisc_dequeue(struct Qdisc *sch)
 				
 				q->time_ns=now;
 				q->sum_len_bytes-=len;
+				cl->len_bytes-=len;
 				sch->q.qlen--;
+				
 				/* Bucket */
 				q->tokens=min_t(u64,toks-pkt_ns,DWRR_QDISC_BUCKET_NS);
 				
@@ -185,7 +179,7 @@ static struct sk_buff* dwrr_qdisc_dequeue(struct Qdisc *sch)
 					list_del(&cl->alist);
 				}
 				
-				printk(KERN_INFO "Dequeue from queue %d\n",cl->id);
+				//printk(KERN_INFO "Dequeue from queue %d\n",cl->id);
 				return skb;
 			}
 			/* if we don't have enough tokens to realse this packet */
@@ -225,19 +219,21 @@ static int dwrr_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 		return NET_XMIT_DROP;
 	}
 	else
-	{
-		/* ECN marking */
-		if(cl->qdisc->q.qlen>=DWRR_QDISC_QUEUE_ECN_THRESH_PKTS)
-		{
-			//printk(KERN_INFO "ECN marking\n");
-			dwrr_qdisc_ecn(skb);
-		}
-		
+	{		
 		ret=qdisc_enqueue(skb, cl->qdisc);
 		if(ret == NET_XMIT_SUCCESS) 
 		{
 			sch->q.qlen++;
 			q->sum_len_bytes+=len;
+			cl->len_bytes+=len;
+			
+			/* ECN marking */
+			if(cl->len_bytes>=DWRR_QDISC_QUEUE_ECN_THRESH[cl->id]*DWRR_QDISC_MTU_BYTES)
+			{
+				//printk(KERN_INFO "ECN marking\n");
+				dwrr_qdisc_ecn(skb);
+			}
+			
 			if(cl->active==0)
 			{
 				cl->deficitCounter=0;
@@ -353,10 +349,11 @@ static int dwrr_qdisc_init(struct Qdisc *sch, struct nlattr *opt)
 		/* Initialize variables for dwrr_class */
 		INIT_LIST_HEAD(&((q->queues[i]).alist));
 		(q->queues[i]).id=i;
-		(q->queues[i]).quantum=(i+1)*DWRR_QDISC_MTU_BYTES;
+		//(q->queues[i]).quantum=DWRR_QDISC_CLASS_QUANTUM[i];
 		(q->queues[i]).deficitCounter=0;
 		(q->queues[i]).active=0;
 		(q->queues[i]).curr=0;
+		(q->queues[i]).len_bytes=0;
 	}
 	return dwrr_qdisc_change(sch,opt);
 err:
@@ -382,15 +379,15 @@ static struct Qdisc_ops dwrr_qdisc_ops __read_mostly = {
 
 static int __init dwrr_qdisc_module_init(void)
 {
-	//if(pias_qdisc_params_init()<0)
-	//	return -1;
+	if(dwrr_qdisc_params_init()<0)
+		return -1;
 	printk(KERN_INFO "sch_dwrr: start working\n");
 	return register_qdisc(&dwrr_qdisc_ops);
 }
 
 static void __exit dwrr_qdisc_module_exit(void)
 {
-	//pias_qdisc_params_exit();
+	dwrr_qdisc_params_exit();
 	unregister_qdisc(&dwrr_qdisc_ops);
 	printk(KERN_INFO "sch_dwrr: stop working\n");
 }
