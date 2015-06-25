@@ -8,6 +8,11 @@
 #define max(arg1,arg2) (arg1>arg2 ? arg1 : arg2)
 #define min(arg1,arg2) (arg1<arg2 ? arg1 : arg2)
 
+void DWRR_Timer::expire(Event *e)
+{
+	queue->timeout(0);
+}
+
 /* Insert a queue to the tail of an active list. Return true if insert succeeds */
 static void InsertTailList(PacketDWRR* list, PacketDWRR *q)
 {
@@ -65,13 +70,8 @@ static class DWRRClass : public TclClass
 		}
 } class_dwrr;
 
-DWRR::DWRR()
-{	
-	queue_num_=32;
-	mean_pktsize_=1500;
-	port_thresh_=65;
-	marking_scheme_=0;
-	
+DWRR::DWRR():timer(this),init(0),queue_num_(32),mean_pktsize_(1500),port_thresh_(65),marking_scheme_(0)
+{		
 	queues=new PacketDWRR[MAX_QUEUE_NUM];
 	activeList=new PacketDWRR();
 	
@@ -83,12 +83,16 @@ DWRR::DWRR()
 	bind("mean_pktsize_", &mean_pktsize_);
 	bind("port_thresh_",&port_thresh_);
 	bind("marking_scheme_",&marking_scheme_);
+	bind_bool("estimate_rate_",&estimate_rate_);
+	bind_time("estimate_period_",&estimate_period_);
+	bind("estimate_alpha_",&estimate_alpha_);
 }
 
 DWRR::~DWRR() 
 {
 	delete activeList;
 	delete [] queues;
+	timer.cancel();
 }
 
 /* Get total length of all queues in bytes */
@@ -139,20 +143,35 @@ int DWRR::MarkingECN(int q)
 		if((queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&marking_scheme_==QUEUE_SMART_MARKING)||
 		(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&TotalByteLength()>=port_thresh_*mean_pktsize_&&marking_scheme_==HYBRID_SMRT_MARKING))
 		{
-			int quantum_sum=0;
+			int backlogged_quantum_sum=0;	//Sum of quantum of backlogged queues
+			int backlogged_X_sum=0;	//Sum of rate (X) of backlogged queues 
+			int nonbacklogged_X_sum=0;	//Sum of rate (X) of non-backlogged queues
 			double thresh=0;
 		
 			/* Find all backlogged queues and get the sum of their quantum */
 			for(int i=0;i<queue_num_;i++)
 			{
-				if((queues[i].current==false&&queues[i].byteLength()>=queues[i].quantum)	//queues[i] is not the head node 
-				||(queues[i].current==true&&queues[i].byteLength()>=queues[i].deficitCounter))	//queues[i] is the head node and being served now
-					quantum_sum+=queues[i].quantum;
+				/* If the queues[i] can use up available quantum in this round, it is a backlogged queue */ 
+				if((queues[i].current==false&&queues[i].byteLength()>queues[i].quantum+queues[i].deficitCounter)	//queues[i] is not the head node 
+				||(queues[i].current==true&&queues[i].byteLength()>queues[i].deficitCounter))	//queues[i] is the head node and being served now
+				{
+					backlogged_quantum_sum+=queues[i].quantum;
+					backlogged_X_sum+=queues[i].X;
+				}
+				else
+				{
+					nonbacklogged_X_sum+=queues[i].X;
+				}
 			}
 	
-			if(quantum_sum>0)
+			if(backlogged_quantum_sum>0)
 			{
-				thresh=queues[q].quantum*port_thresh_/quantum_sum;
+				thresh=queues[q].quantum*port_thresh_/backlogged_quantum_sum;
+				/* If we estimate incoming rate for all queues and leverage this information to calculate ECN marking threshold */
+				if(estimate_rate_&&backlogged_X_sum)
+				{
+					thresh=thresh*backlogged_X_sum/(backlogged_X_sum+nonbacklogged_X_sum);
+				}
 				if(queues[q].byteLength()>=thresh*mean_pktsize_)
 					return 1;
 				else 
@@ -271,6 +290,23 @@ int DWRR::command(int argc, const char*const* argv)
 	return (Queue::command(argc, argv));	
 }
 
+/* Timeout callback function */
+void DWRR::timeout(int)
+{
+	for(int i=0;i<queue_num_;i++)
+	{
+		//For debug
+		//fprintf(stderr, " %d", queues[i].X);
+		queues[i].X=queues[i].X*(1-estimate_alpha_);
+	}
+	//fprintf(stderr, "\n");
+	timer.resched(estimate_period_);	//Restart timer
+	
+	//For debug
+	//double now=Scheduler::instance().clock();
+	//fprintf(stderr,"%f %f\n",now,estimate_period_);
+}
+
 /* Receive a new packet */
 void DWRR::enque(Packet *p)
 {
@@ -279,6 +315,13 @@ void DWRR::enque(Packet *p)
 	hdr_flags* hf=hdr_flags::access(p);
 	int pktSize=hdr_cmn::access(p)->size();
 	int qlimBytes=qlim_*mean_pktsize_;
+	
+	if(!init)
+	{
+		/* Start timer */
+		timer.resched(estimate_period_);
+		init=1;
+	}
 	
 	queue_num_=min(queue_num_,MAX_QUEUE_NUM);
 	
@@ -293,8 +336,9 @@ void DWRR::enque(Packet *p)
 	if(prio>=queue_num_||prio<0)
 		prio=queue_num_-1;
 	
-	/* Enqueue ECN marking */
-	if(MarkingECN(prio)>0&&hf->ect())
+	queues[prio].enque(p); 		
+	queues[prio].X+=pktSize;	//Update per-queue DRE register
+	if(MarkingECN(prio)>0&&hf->ect())	//Enqueue ECN marking
 		hf->ce() = 1;
 	
 	//For debug
@@ -310,7 +354,6 @@ void DWRR::enque(Packet *p)
 		//printf("Insert to activeList\n");
 	}
 	
-	queues[prio].enque(p); 		
 	trace_qlen();
 	trace_total_qlen();
 }
