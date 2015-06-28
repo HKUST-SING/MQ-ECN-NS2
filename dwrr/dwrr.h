@@ -34,15 +34,19 @@ class DWRR_Timer: public TimerHandler
 class PacketDWRR: public PacketQueue
 {
 	public: 
-		PacketDWRR(): quantum(1500),deficitCounter(0),thresh(0),active(false),current(false),next(NULL),X(0) {} 
+		PacketDWRR(): quantum(1500),deficitCounter(0),thresh(0),active(false),backlogged(false),current(false),next(NULL),input_rate(0), input_bytes(0), start_time(0) {} 
+		
 		int quantum;	//quantum (weight) of this queue 
 		int deficitCounter;	//deficit counter for this queue 
 		double thresh;	// per-queue ECN marking threshold (pkts)
 		bool active;	//whether this queue is active (qlen>0)
+		bool backlogged;	//whether this queue is backlogged
 		bool current;	//whether this queue is currently being served (deficitCounter has been updated for thie round)
 		PacketDWRR *next;	//pointer to next node
 		
-		int X;	//register for Discounting Rate Estimator (DRE)
+		double input_rate;	//input rate estimation
+		int input_bytes;	//input traffic (bytes) 
+		double start_time;	//time when this queue is inserted to active list 
 		
 		friend class DWRR;
 };
@@ -70,9 +74,11 @@ class DWRR : public Queue
 		int mean_pktsize_;	//MTU in bytes 
 		double port_thresh_;	//per-port ECN marking threshold (pkts)
 		int marking_scheme_;	//ECN marking policy 
-		int estimate_rate_;	//whether we estimate rates 
-		double estimate_period_;	//period to estimate rate
-		double estimate_alpha_;	//multiplicative factor between 0 and 1
+		int round_;	//Number of rounds for backlogged judgement
+		double round_time_;	//round time estimation value
+		double estimate_rate_period_;	//period to estimate rate
+		double estimate_rate_alpha_;	//factor between 0 and 1 for rate estimation
+		double estimate_round_alpha_;	//factor between 0 and 1 for round time estimation
 		
 		DWRR_Timer timer;	//timer to estimate rate
 		
