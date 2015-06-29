@@ -295,6 +295,24 @@ void DWRR::timeout(int)
 	//fprintf(stderr,"%f %f\n",now,estimate_period_);
 }
 
+/* Update backlogged status of queues */
+void DWRR::set_backlogged(PacketDWRR *q)
+{
+	/* Backlogged judge: queue length>0 and queue length+(round-1)*T*input_rate > Deficit Counter + round*quantum */
+	if(q->byteLength()>0)
+	{	
+		if ((q->current==false&&q->byteLength()+(round_-1)*round_time_*q->input_rate>q->deficitCounter+round_*q->quantum)
+		||(q->current==true&&q->byteLength()+(round_-1)*round_time_*q->input_rate>q->deficitCounter+(round_-1)*q->quantum))
+			q->backlogged=true;
+		else
+			q->backlogged=false;
+	}
+	else
+	{
+		q->backlogged=false;
+	}
+}
+
 /* Receive a new packet */
 void DWRR::enque(Packet *p)
 {
@@ -327,20 +345,11 @@ void DWRR::enque(Packet *p)
 	queues[prio].enque(p); 		
 	queues[prio].input_bytes+=pktSize;
 	
-	/* Backlogged judge: queue length+(round-1)*T*input_rate > Deficit Counter + round*quantum */
-	if(queues[prio].current==false&&queues[prio].byteLength()+(round_-1)*round_time_*queues[prio].input_rate>queues[prio].deficitCounter+round_*queues[prio].quantum
-	||queues[prio].current==true&&queues[prio].byteLength()+(round_-1)*round_time_*queues[prio].input_rate>queues[prio].deficitCounter+(round_-1)*queues[prio].quantum)
-		queues[prio].backlogged=true;
-	else
-		queues[prio].backlogged=false;
-	
 	/* Enqueue ECN marking */
+	set_backlogged(&queues[prio]);
 	if(queues[prio].backlogged&&MarkingECN(prio)>0&&hf->ect())	
 		hf->ce() = 1;
-	
-	//For debug
-	//printf ("enque to %d\n", prio);
-	
+		
 	/* if queues[prio] is not in activeList */
 	if(queues[prio].active==false)
 	{
@@ -349,7 +358,6 @@ void DWRR::enque(Packet *p)
 		queues[prio].current=false;
 		queues[prio].start_time=Scheduler::instance().clock();	//Start time of this round
 		InsertTailList(activeList, &queues[prio]);
-		//printf("Insert to activeList\n");
 	}
 	
 	trace_qlen();
@@ -390,6 +398,7 @@ Packet *DWRR::deque(void)
 				{
 					pkt=headNode->deque();
 					headNode->deficitCounter-=pktSize;
+					set_backlogged(headNode);//Update backlogged status
 					//printf("deque a packet\n");
 					
 					/* After dequeue, headNode becomes empty queue */

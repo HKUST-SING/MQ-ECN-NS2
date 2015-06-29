@@ -62,6 +62,7 @@ class DWRR : public Queue
 	protected:
 		Packet *deque(void);
 		void enque(Packet *pkt);
+		void set_backlogged(PacketDWRR *q);
 		int TotalByteLength();	//Get total length of all queues in bytes 
 		int MarkingECN(int q); //Determine whether we need to mark ECN, q is current queue number 
 		
