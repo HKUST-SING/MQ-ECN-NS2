@@ -8,10 +8,6 @@
 #define max(arg1,arg2) (arg1>arg2 ? arg1 : arg2)
 #define min(arg1,arg2) (arg1<arg2 ? arg1 : arg2)
 
-void DWRR_Timer::expire(Event *e)
-{
-	queue->timeout(0);
-}
 
 /* Insert a queue to the tail of an active list. Return true if insert succeeds */
 static void InsertTailList(PacketDWRR* list, PacketDWRR *q)
@@ -70,10 +66,11 @@ static class DWRRClass : public TclClass
 		}
 } class_dwrr;
 
-DWRR::DWRR():timer(this),init(0)
+DWRR::DWRR()
 {		
 	queues=new PacketDWRR[MAX_QUEUE_NUM];
 	activeList=new PacketDWRR();
+	round_time=0;
 	
 	total_qlen_tchan_=NULL;
 	qlen_tchan_=NULL;
@@ -83,18 +80,14 @@ DWRR::DWRR():timer(this),init(0)
 	bind("mean_pktsize_", &mean_pktsize_);
 	bind("port_thresh_",&port_thresh_);
 	bind("marking_scheme_",&marking_scheme_);
-	bind("round_",&round_);
-	bind("round_time_",&round_time_);
-	bind_time("estimate_rate_period_",&estimate_rate_period_);
-	bind("estimate_rate_alpha_",&estimate_rate_alpha_);
-	bind("estimate_round_alpha_",&estimate_rate_alpha_);
+	bind("estimate_round_alpha_",&estimate_round_alpha_);
+	bind_bw("link_capacity_",&link_capacity_);
 }
 
 DWRR::~DWRR() 
 {
 	delete activeList;
 	delete [] queues;
-	timer.cancel();
 }
 
 /* Get total length of all queues in bytes */
@@ -120,7 +113,7 @@ int DWRR::MarkingECN(int q)
 	/* Per-queue ECN marking */
 	if(marking_scheme_==PER_QUEUE_MARKING)
 	{
-		if(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_)
+		if(queues[q].byteLength()>queues[q].thresh*mean_pktsize_)
 			return 1;
 		else
 			return 0;
@@ -128,7 +121,7 @@ int DWRR::MarkingECN(int q)
 	/* Per-port ECN marking */
 	else if(marking_scheme_==PER_PORT_MARKING)
 	{
-		if(TotalByteLength()>=port_thresh_*mean_pktsize_)
+		if(TotalByteLength()>port_thresh_*mean_pktsize_)
 			return 1;
 		else
 			return 0;
@@ -145,22 +138,15 @@ int DWRR::MarkingECN(int q)
 		if((queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&marking_scheme_==QUEUE_SMART_MARKING)||
 		(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&TotalByteLength()>=port_thresh_*mean_pktsize_&&marking_scheme_==HYBRID_SMRT_MARKING))
 		{
-			int backlogged_quantum_sum=0;	//Sum of quantum of backlogged queues
-			double thresh=0;
-		
-			/* Find all backlogged queues and get the sum of their quantum */
-			for(int i=0;i<queue_num_;i++)
+			if(round_time>0)
 			{
-				if(queues[i].backlogged)	
-					backlogged_quantum_sum+=queues[i].quantum;
-			}
-	
-			if(backlogged_quantum_sum>0)
-			{
-				thresh=queues[q].quantum*port_thresh_/backlogged_quantum_sum;
-				if(queues[q].byteLength()>=thresh*mean_pktsize_)
+				double weightedFairRate=queues[q].quantum*8/round_time;
+				double thresh=max(weightedFairRate/link_capacity_,1)*port_thresh_;
+				//For debug
+				//printf("%f",thresh);
+				if(queues[q].byteLength()>thresh*mean_pktsize_)
 					return 1;
-				else 
+				else
 					return 0;
 			}
 			else
@@ -276,43 +262,6 @@ int DWRR::command(int argc, const char*const* argv)
 	return (Queue::command(argc, argv));	
 }
 
-/* Timeout callback function */
-void DWRR::timeout(int)
-{
-	for(int i=0;i<queue_num_;i++)
-	{
-		double rate=queues[i].input_bytes/estimate_rate_period_;
-		queues[i].input_bytes=0;
-		queues[i].input_rate=queues[i].input_rate*estimate_rate_alpha_+(1-estimate_rate_alpha_)*rate;
-		//For debug
-		//fprintf(stderr, "%f ", queues[i].input_rate);
-	}
-	//fprintf(stderr, "\n");
-	timer.resched(estimate_rate_period_);	//Restart timer
-	
-	//For debug
-	//double now=Scheduler::instance().clock();
-	//fprintf(stderr,"%f %f\n",now,estimate_period_);
-}
-
-/* Update backlogged status of queues */
-void DWRR::set_backlogged(PacketDWRR *q)
-{
-	/* Backlogged judge: queue length>0 and queue length+(round-1)*T*input_rate > Deficit Counter + round*quantum */
-	if(q->byteLength()>0)
-	{	
-		if ((q->current==false&&q->byteLength()+(round_-1)*round_time_*q->input_rate>q->deficitCounter+round_*q->quantum)
-		||(q->current==true&&q->byteLength()+(round_-1)*round_time_*q->input_rate>q->deficitCounter+(round_-1)*q->quantum))
-			q->backlogged=true;
-		else
-			q->backlogged=false;
-	}
-	else
-	{
-		q->backlogged=false;
-	}
-}
-
 /* Receive a new packet */
 void DWRR::enque(Packet *p)
 {
@@ -321,15 +270,10 @@ void DWRR::enque(Packet *p)
 	hdr_flags* hf=hdr_flags::access(p);
 	int pktSize=hdr_cmn::access(p)->size();
 	int qlimBytes=qlim_*mean_pktsize_;
+	queue_num_=min(queue_num_,MAX_QUEUE_NUM);
 	
-	if(!init)
-	{
-		/* Start timer */
-		timer.resched(estimate_rate_period_);
-		queue_num_=min(queue_num_,MAX_QUEUE_NUM);
-		init=1;
-	}
-	
+	//For debug
+	//printf("%f",link_capacity_);
 	
 	/* The shared buffer is overfilld */
 	if(TotalByteLength()+pktSize>qlimBytes)
@@ -341,13 +285,10 @@ void DWRR::enque(Packet *p)
 	
 	if(prio>=queue_num_||prio<0)
 		prio=queue_num_-1;
-	
-	queues[prio].enque(p); 		
-	queues[prio].input_bytes+=pktSize;
-	
+
 	/* Enqueue ECN marking */
-	set_backlogged(&queues[prio]);
-	if(queues[prio].backlogged&&MarkingECN(prio)>0&&hf->ect())	
+	queues[prio].enque(p); 			
+	if(MarkingECN(prio)>0&&hf->ect())	
 		hf->ce() = 1;
 		
 	/* if queues[prio] is not in activeList */
@@ -398,7 +339,6 @@ Packet *DWRR::deque(void)
 				{
 					pkt=headNode->deque();
 					headNode->deficitCounter-=pktSize;
-					set_backlogged(headNode);//Update backlogged status
 					//printf("deque a packet\n");
 					
 					/* After dequeue, headNode becomes empty queue */
@@ -410,7 +350,7 @@ Packet *DWRR::deque(void)
 						headNode->current=false;
 						double round_time_sample=Scheduler::instance().clock()-headNode->start_time;
 						//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
-						round_time_=round_time_*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
+						round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
 					}
 					break;
 				}
@@ -421,12 +361,16 @@ Packet *DWRR::deque(void)
 					headNode->current=false;
 					double round_time_sample=Scheduler::instance().clock()-headNode->start_time;
 					//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
-					round_time_=round_time_*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
+					round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
 					headNode->start_time=Scheduler::instance().clock();	//Reset start time 
 					InsertTailList(activeList, headNode);
 				}
 			}
 		}	
+	}
+	else
+	{
+		round_time=round_time*estimate_round_alpha_;
 	}
 	
 	return pkt;
