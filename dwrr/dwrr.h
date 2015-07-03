@@ -48,12 +48,15 @@ class DWRR : public Queue
 		Packet *deque(void);
 		void enque(Packet *pkt);
 		int TotalByteLength();	//Get total length of all queues in bytes 
+		int TotalLength();	//Get total length of all queues in packets
+		int TotalQuantum();	//Get sum of quantum
 		int MarkingECN(int q); //Determine whether we need to mark ECN, q is current queue number 
 		
 		/* Variables */
 		PacketDWRR *queues;	//underlying multi-FIFO (CoS) queues
 		PacketDWRR *activeList;	//list for active queues	
 		double round_time;	//Round time estimation value
+		bool init;
 		
 		int queue_num_;	//number of queues 
 		int mean_pktsize_;	//MTU in bytes 

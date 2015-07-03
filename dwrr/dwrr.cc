@@ -70,6 +70,7 @@ DWRR::DWRR()
 {		
 	queues=new PacketDWRR[MAX_QUEUE_NUM];
 	activeList=new PacketDWRR();
+	init=false;
 	round_time=0;
 	
 	total_qlen_tchan_=NULL;
@@ -97,6 +98,28 @@ int DWRR::TotalByteLength()
 	for(int i=0;i<queue_num_;i++)
 	{
 		result+=queues[i].byteLength();
+	}
+	return result;
+}
+
+/* Get total length of all queues in packets */
+int DWRR::TotalLength()
+{
+	int result=0;
+	for(int i=0;i<queue_num_;i++)
+	{
+		result+=queues[i].length();
+	}
+	return result;
+}
+
+
+int DWRR::TotalQuantum()
+{
+	int result=0;
+	for(int i=0;i<queue_num_;i++)
+	{
+		result+=queues[i].quantum;
 	}
 	return result;
 }
@@ -137,13 +160,13 @@ int DWRR::MarkingECN(int q)
 		 */ 
 		if((queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&marking_scheme_==QUEUE_SMART_MARKING)||
 		(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&TotalByteLength()>=port_thresh_*mean_pktsize_&&marking_scheme_==HYBRID_SMRT_MARKING))
-		{
-			if(round_time>0)
+		{			
+			if(round_time>0.000000001&&link_capacity_>0)	//Round time>1ns
 			{
 				double weightedFairRate=queues[q].quantum*8/round_time;
-				double thresh=max(weightedFairRate/link_capacity_,1)*port_thresh_;
+				double thresh=min(weightedFairRate/link_capacity_,1)*port_thresh_;
 				//For debug
-				//printf("%f",thresh);
+				//printf("round time: %f threshold: %f\n",round_time, thresh);
 				if(queues[q].byteLength()>thresh*mean_pktsize_)
 					return 1;
 				else
@@ -274,6 +297,11 @@ void DWRR::enque(Packet *p)
 	
 	//For debug
 	//printf("%f",link_capacity_);
+	if(!init)
+	{
+		round_time=TotalQuantum()*8/link_capacity_;
+		init=true;
+	}
 	
 	/* The shared buffer is overfilld */
 	if(TotalByteLength()+pktSize>qlimBytes)
@@ -297,7 +325,12 @@ void DWRR::enque(Packet *p)
 		queues[prio].deficitCounter=0;
 		queues[prio].active=true;
 		queues[prio].current=false;
-		queues[prio].start_time=Scheduler::instance().clock();	//Start time of this round
+		/* If congestion happens */
+		if(TotalLength()>1)
+			queues[prio].start_time=Scheduler::instance().clock();	//Start time of this round
+		/* Link is not fully utilized */
+		else
+			queues[prio].start_time=-1;	//No need to sample this round
 		InsertTailList(activeList, &queues[prio]);
 	}
 	
@@ -348,9 +381,13 @@ Packet *DWRR::deque(void)
 						headNode->deficitCounter=0;
 						headNode->active=false;
 						headNode->current=false;
-						double round_time_sample=Scheduler::instance().clock()-headNode->start_time;
-						//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
-						round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
+						if(headNode->start_time>0)
+						{
+							double round_time_sample=Scheduler::instance().clock()-headNode->start_time;
+							//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
+							round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
+							//printf("sample round time: %f round time: %f\n",round_time_sample,round_time);
+						}
 					}
 					break;
 				}
@@ -359,18 +396,23 @@ Packet *DWRR::deque(void)
 				{
 					headNode=RemoveHeadList(activeList);	
 					headNode->current=false;
-					double round_time_sample=Scheduler::instance().clock()-headNode->start_time;
-					//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
-					round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
-					headNode->start_time=Scheduler::instance().clock();	//Reset start time 
+					if(headNode->start_time>0)
+					{
+						double round_time_sample=Scheduler::instance().clock()-headNode->start_time;
+						//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
+						round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
+						//printf("sample round time: %f round time: %f\n",round_time_sample,round_time);
+					}
+					/* If congestion happens */
+					if(TotalLength()>1)
+						headNode->start_time=Scheduler::instance().clock();	//Reset start time 
+					/* Link is not fully utilized */
+					else
+						headNode->start_time=-1;
 					InsertTailList(activeList, headNode);
 				}
 			}
 		}	
-	}
-	else
-	{
-		round_time=round_time*estimate_round_alpha_;
 	}
 	
 	return pkt;
