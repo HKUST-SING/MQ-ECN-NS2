@@ -63,6 +63,7 @@ class DWRR : public Queue
 		double port_thresh_;	//per-port ECN marking threshold (pkts)
 		int marking_scheme_;	//ECN marking policy 
 		double estimate_round_alpha_;	//factor between 0 and 1 for round time estimation
+		int estimate_round_filter_;	//filter some round time samples
 		double link_capacity_;	//Link capacity
 		
 		Tcl_Channel total_qlen_tchan_;	//place to write total_qlen records 

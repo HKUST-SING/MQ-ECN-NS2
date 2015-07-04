@@ -82,6 +82,7 @@ DWRR::DWRR()
 	bind("port_thresh_",&port_thresh_);
 	bind("marking_scheme_",&marking_scheme_);
 	bind("estimate_round_alpha_",&estimate_round_alpha_);
+	bind_bool("estimate_round_filter_",&estimate_round_filter_);
 	bind_bw("link_capacity_",&link_capacity_);
 }
 
@@ -325,12 +326,7 @@ void DWRR::enque(Packet *p)
 		queues[prio].deficitCounter=0;
 		queues[prio].active=true;
 		queues[prio].current=false;
-		/* If congestion happens */
-		if(TotalLength()>1)
-			queues[prio].start_time=Scheduler::instance().clock();	//Start time of this round
-		/* Link is not fully utilized */
-		else
-			queues[prio].start_time=-1;	//No need to sample this round
+		queues[prio].start_time=Scheduler::instance().clock();	//Start time of this round
 		InsertTailList(activeList, &queues[prio]);
 	}
 	
@@ -377,17 +373,19 @@ Packet *DWRR::deque(void)
 					/* After dequeue, headNode becomes empty queue */
 					if(headNode->length()==0)
 					{
-						headNode=RemoveHeadList(activeList);	//Remove head node from activeList
-						headNode->deficitCounter=0;
-						headNode->active=false;
-						headNode->current=false;
-						if(headNode->start_time>0)
+						/* If we enable estimate_round_filter_, we only sample when this queue exactly uses up its quantum */
+						if((headNode->deficitCounter==0&&estimate_round_filter_)||(!estimate_round_filter_))
 						{
-							double round_time_sample=Scheduler::instance().clock()-headNode->start_time;
+							/* The packet has not been sent yet */
+							double round_time_sample=Scheduler::instance().clock()-headNode->start_time+pktSize*8/link_capacity_;
 							//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
 							round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
 							//printf("sample round time: %f round time: %f\n",round_time_sample,round_time);
 						}
+						headNode=RemoveHeadList(activeList);	//Remove head node from activeList
+						headNode->deficitCounter=0;
+						headNode->active=false;
+						headNode->current=false;
 					}
 					break;
 				}
@@ -396,19 +394,11 @@ Packet *DWRR::deque(void)
 				{
 					headNode=RemoveHeadList(activeList);	
 					headNode->current=false;
-					if(headNode->start_time>0)
-					{
-						double round_time_sample=Scheduler::instance().clock()-headNode->start_time;
-						//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
-						round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
-						//printf("sample round time: %f round time: %f\n",round_time_sample,round_time);
-					}
-					/* If congestion happens */
-					if(TotalLength()>1)
-						headNode->start_time=Scheduler::instance().clock();	//Reset start time 
-					/* Link is not fully utilized */
-					else
-						headNode->start_time=-1;
+					double round_time_sample=Scheduler::instance().clock()-headNode->start_time;
+					//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
+				  	round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
+					//printf("sample round time: %f round time: %f\n",round_time_sample,round_time);
+					headNode->start_time=Scheduler::instance().clock();	//Reset start time 
 					InsertTailList(activeList, headNode);
 				}
 			}
