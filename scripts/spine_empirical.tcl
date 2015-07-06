@@ -4,7 +4,7 @@ set ns [new Simulator]
 set sim_start [clock seconds]
 puts "Host: [exec uname -a]"
 
-if {$argc != 25} {
+if {$argc != 26} {
     puts "wrong number of arguments $argc"
     exit 0
 }
@@ -33,18 +33,21 @@ set min_rto [lindex $argv 16]
 #our dynamic hybrid algorithm (3) and per-queue min (4)
 set ECN_scheme [lindex $argv 17]
 set DCTCP_K [lindex $argv 18]
+set switchAlg [lindex $argv 19]
 #### topology
-set topology_spt [lindex $argv 19]
-set topology_tors [lindex $argv 20]
-set topology_spines [lindex $argv 21]
-set topology_x [lindex $argv 22]
+set topology_spt [lindex $argv 20]
+set topology_tors [lindex $argv 21]
+set topology_spines [lindex $argv 22]
+set topology_x [lindex $argv 23]
 #### Flow size distribution CDF file
-set flow_cdf [lindex $argv 23]
+set flow_cdf [lindex $argv 24]
 #### FCT log file
-set fct_log [lindex $argv 24]
+set fct_log [lindex $argv 25]
 
 set pktSize 1460;	#packet size in bytes
-set quantum [expr $pktSize+40];	#quantum for each queue
+set quantum [expr $pktSize+40];	#quantum for each queue (DWRR)
+set weight 1; #weight for each queue (WRR)
+set link_capacity_unit Gb
 
 puts "Simulation input:" 
 puts "Dynamic Flow - Pareto"
@@ -65,6 +68,7 @@ puts "DCTCP_g $DCTCP_g"
 puts "slow-start Restart $slowstartrestart"
 puts "ECN marking scheme $ECN_scheme"
 puts "DCTCP_K_ $DCTCP_K"
+puts "switchAlg $switchAlg"
 puts "pktSize(payload) $pktSize Bytes"
 puts "pktSize(include header) [expr $pktSize + 40] Bytes"
 puts "service number $service_num"
@@ -103,16 +107,29 @@ if {[string compare $sourceAlg "DCTCP-Sack"] == 0} {
 
 ################# Switch Options ######################
 Queue set limit_ $queueSize
+
 Queue/DWRR set queue_num_ $service_num
 Queue/DWRR set mean_pktsize_ [expr $pktSize+40]
 Queue/DWRR set port_thresh_ $DCTCP_K
-Queue/DWRR set backlogged_in_bytes_ false
+Queue/DWRR set estimate_round_alpha_ 0.75
+Queue/DWRR set estimate_round_filter_ false
+Queue/DWRR set link_capacity_ $link_rate$link_capacity_unit
+
+Queue/WRR set queue_num_ $service_num
+Queue/WRR set mean_pktsize_ [expr $pktSize+40]
+Queue/WRR set port_thresh_ $DCTCP_K
+Queue/WRR set estimate_pktsize_alpha_ 0.75
+Queue/WRR set estimate_round_alpha_ 0.75
+Queue/WRR set estimate_round_filter_ false
+Queue/WRR set link_capacity_ $link_rate$link_capacity_unit
 
 if {$ECN_scheme!=4} {
 	Queue/DWRR set marking_scheme_ $ECN_scheme
+	Queue/WRR set marking_scheme_ $ECN_scheme
 } else {
 	#Per-queue-min 
 	Queue/DWRR set marking_scheme_ 0
+	Queue/WRR set marking_scheme_ 0
 }
 
 ############## Multipathing ###########################
@@ -146,15 +163,20 @@ for {set i 0} {$i < $topology_spines} {incr i} {
 
 for {set i 0} {$i < $S} {incr i} {
     set j [expr $i/$topology_spt]
-    $ns duplex-link $s($i) $n($j) [set link_rate]Gb [expr $host_delay + $mean_link_delay]  DWRR   
+    $ns duplex-link $s($i) $n($j) [set link_rate]Gb [expr $host_delay + $mean_link_delay]  $switchAlg   
 	
-##### Configure DWRR #####
+##### Configure DWRR/WRR #####
 	
 	set L [$ns link $s($i) $n($j)] 
 	set q [$L set queue_]
+	$q set link_capacity_ $link_rate$link_capacity_unit
+	
 	for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-		$q set-quantum $service_i $quantum 
-		
+		if {[string compare $switchAlg "DWRR"] == 0} {
+			$q set-quantum $service_i $quantum 
+		} elseif {[string compare $switchAlg "WRR"] == 0} {
+			$q set-weight $service_i $weight
+		}
 		#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
 		if {$ECN_scheme>=2} {
 			$q set-thresh $service_i [expr $DCTCP_K/$service_num]
@@ -165,9 +187,14 @@ for {set i 0} {$i < $S} {incr i} {
 	
 	set L [$ns link $n($j) $s($i)] 
 	set q [$L set queue_]
+	$q set link_capacity_ $link_rate$link_capacity_unit
+	
 	for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-		$q set-quantum $service_i $quantum
-		
+		if {[string compare $switchAlg "DWRR"] == 0} {
+			$q set-quantum $service_i $quantum 
+		} elseif {[string compare $switchAlg "WRR"] == 0} {
+			$q set-weight $service_i $weight
+		}
 		#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
 		if {$ECN_scheme>=2} {
 			$q set-thresh $service_i [expr $DCTCP_K/$service_num]
@@ -179,14 +206,20 @@ for {set i 0} {$i < $S} {incr i} {
 
 for {set i 0} {$i < $topology_tors} {incr i} {
     for {set j 0} {$j < $topology_spines} {incr j} {
-	$ns duplex-link $n($i) $a($j) [set UCap]Gb $mean_link_delay DWRR 
+		$ns duplex-link $n($i) $a($j) [set UCap]Gb $mean_link_delay $switchAlg 
 	
-##### Configure DWRR #####
+##### Configure DWRR/WRR #####
 	
 		set L [$ns link $n($i) $a($j)] 
 		set q [$L set queue_]
+		$q set link_capacity_ $UCap$link_capacity_unit
+			
 		for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-			$q set-quantum $service_i $quantum
+			if {[string compare $switchAlg "DWRR"] == 0} {
+				$q set-quantum $service_i $quantum 
+			} elseif {[string compare $switchAlg "WRR"] == 0} {
+				$q set-weight $service_i $weight
+			}
 			#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
 			if {$ECN_scheme>=2} {
 				$q set-thresh $service_i [expr $DCTCP_K/$service_num]
@@ -197,8 +230,14 @@ for {set i 0} {$i < $topology_tors} {incr i} {
 	
 		set L [$ns link $a($j) $n($i)] 
 		set q [$L set queue_]
+		$q set link_capacity_ $UCap$link_capacity_unit
+				
 		for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-			$q set-quantum $service_i $quantum
+			if {[string compare $switchAlg "DWRR"] == 0} {
+				$q set-quantum $service_i $quantum 
+			} elseif {[string compare $switchAlg "WRR"] == 0} {
+				$q set-weight $service_i $weight
+			}
 			#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
 			if {$ECN_scheme>=2} {
 				$q set-thresh $service_i [expr $DCTCP_K/$service_num]
@@ -206,7 +245,7 @@ for {set i 0} {$i < $topology_tors} {incr i} {
 				$q set-thresh $service_i [expr $DCTCP_K] 
 			}
 		}
-    }
+	}
 }
 
 
@@ -223,25 +262,25 @@ set flow_fin 0
 
 set flowlog [open $fct_log w]
 set init_fid 0
+
 for {set j 0} {$j < $S } {incr j} {
     for {set i 0} {$i < $S } {incr i} {
-	if {$i != $j} {
-		#for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-		set agtagr($i,$j) [new Agent_Aggr_pair]
-		set service_id [expr {int(rand()*$service_num)}]
-		#Randomly choose service 
-		$agtagr($i,$j) setup $s($i) $s($j) "$i $j" $connections_per_pair $init_fid  $service_id "TCP_pair"
-		$agtagr($i,$j) attach-logfile $flowlog
+		if {$i != $j} {
+			set agtagr($i,$j) [new Agent_Aggr_pair]
+		
+			#Choose service randomly
+			set service_id [expr {int(rand()*$service_num)}]
+			$agtagr($i,$j) setup $s($i) $s($j) "$i $j" $connections_per_pair $init_fid  $service_id "TCP_pair"
+			$agtagr($i,$j) attach-logfile $flowlog
 
-		puts -nonewline "($i,$j) service $service_id"
-		#For Poisson/Pareto
-		$agtagr($i,$j) set_PCarrival_process  [expr $lambda/($S - 1)] $flow_cdf [expr 17*$i+1244*$j] [expr 33*$i+4369*$j]
-		#$ns at 0.1 "$agtagr($i,$j) warmup 0.5 5"
-		$ns at 1 "$agtagr($i,$j) init_schedule"
+			puts -nonewline "($i,$j) service $service_id"
+			#For Poisson/Pareto
+			$agtagr($i,$j) set_PCarrival_process  [expr $lambda/($S - 1)] $flow_cdf [expr 17*$i+1244*$j] [expr 33*$i+4369*$j]
+			#$ns at 0.1 "$agtagr($i,$j) warmup 0.5 5"
+			$ns at 1 "$agtagr($i,$j) init_schedule"
 	    
-		set init_fid [expr $init_fid + $connections_per_pair];
-		#}
-	}
+			set init_fid [expr $init_fid + $connections_per_pair];
+		}
     }
 }
 

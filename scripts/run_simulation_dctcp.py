@@ -29,8 +29,9 @@ ackRatio=1
 slowstartrestart='true'
 DCTCP_g=0.0625
 min_rto=0.005
-ECN_scheme_arr=[0,2,3,4]
+ECN_scheme_arr=[2]
 DCTCP_K=65.0
+switchAlg='WRR'
 topology_spt=16
 topology_tors=9
 topology_spines=4
@@ -55,7 +56,7 @@ for service_num in service_num_arr:
 				transport='dctcp'
 			
 			#Directory name: workload_transport_scheme_[ECN_scheme]_load_[load]_service_[service_num]	
-			directory_name='websearch_'+transport+'_scheme_'+str(ECN_scheme)+'_load_'+str(int(load*10))+'_service_'+str(service_num)
+			directory_name='websearch_'+switchAlg+'_'+transport+'_scheme_'+str(ECN_scheme)+'_load_'+str(int(load*10))+'_service_'+str(service_num)
 		
 			#Simulation command
 			cmd=ns_path+' '+sim_script+' '\
@@ -78,6 +79,7 @@ for service_num in service_num_arr:
 				+str(min_rto)+' '\
 				+str(ECN_scheme)+' '\
 				+str(DCTCP_K)+' '\
+				+str(switchAlg)+' '\
 				+str(topology_spt)+' '\
 				+str(topology_tors)+' '\
 				+str(topology_spines)+' '\
