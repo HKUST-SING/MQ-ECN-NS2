@@ -84,6 +84,7 @@ DWRR::DWRR()
 	bind("estimate_round_alpha_",&estimate_round_alpha_);
 	bind_bool("estimate_round_filter_",&estimate_round_filter_);
 	bind_bw("link_capacity_",&link_capacity_);
+	bind_bool("debug_",&debug_);
 }
 
 DWRR::~DWRR() 
@@ -378,9 +379,9 @@ Packet *DWRR::deque(void)
 						{
 							/* The packet has not been sent yet */
 							double round_time_sample=Scheduler::instance().clock()-headNode->start_time+pktSize*8/link_capacity_;
-							//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
 							round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
-							//printf("sample round time: %f round time: %f\n",round_time_sample,round_time);
+							if(debug_)	
+								printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
 						}
 						headNode=RemoveHeadList(activeList);	//Remove head node from activeList
 						headNode->deficitCounter=0;
@@ -397,7 +398,8 @@ Packet *DWRR::deque(void)
 					double round_time_sample=Scheduler::instance().clock()-headNode->start_time;
 					//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
 				  	round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
-					//printf("sample round time: %f round time: %f\n",round_time_sample,round_time);
+					if(debug_)	
+						printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
 					headNode->start_time=Scheduler::instance().clock();	//Reset start time 
 					InsertTailList(activeList, headNode);
 				}

@@ -6,7 +6,7 @@ set K_port 80;	#The per-port ECN marking threshold
 set K_0 4; #The per-queue ECN marking threshold of the first queue
 set K_1 16; #The per-queue ECN marking threshold of the second queue
 set W_0 1500; #The quantum (weight) of the first queue
-set W_1 6000; #The quantum (weight) of the second queue
+set W_1 3500; #The quantum (weight) of the second queue
 set marking_schme 2
 
 set RTT 0.0001
@@ -38,11 +38,9 @@ Queue/DWRR set queue_num_ 2
 Queue/DWRR set mean_pktsize_ [expr $packetSize+40]
 Queue/DWRR set port_thresh_ $K_port
 Queue/DWRR set marking_scheme_ $marking_schme
-Queue/DWRR set round_ 3
-Queue/DWRR set round_time_ 0.000006;	#5 MTU-sized packets
-Queue/DWRR set estimate_rate_period_ 0.00012
-Queue/DWRR set estimate_rate_alpha_ 0.25
-Queue/DWRR set estimate_round_alpha_ 0.25
+Queue/DWRR set estimate_round_alpha_ 0.75
+Queue/DWRR set link_capacity_ $lineRate
+Queue/DWRR set debug_ true
 
 set mytracefile [open mytracefile.tr w]
 $ns trace-all $mytracefile

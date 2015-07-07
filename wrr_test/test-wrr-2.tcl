@@ -49,6 +49,7 @@ Queue/WRR set estimate_pktsize_alpha_ 0.75
 Queue/WRR set estimate_round_alpha_ 0.75
 Queue/WRR set estimate_round_filter_ false
 Queue/WRR set link_capacity_ $lineRate
+Queue/WRR set debug_ true
 
 set mytracefile [open mytracefile.tr w]
 $ns trace-all $mytracefile

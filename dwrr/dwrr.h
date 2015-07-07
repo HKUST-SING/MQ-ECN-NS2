@@ -4,7 +4,6 @@
 #include "queue.h"
 #include "config.h"
 #include "trace.h"
-#include "timer-handler.h"
 
 /*Maximum queue number */
 #define MAX_QUEUE_NUM 32
@@ -65,6 +64,7 @@ class DWRR : public Queue
 		double estimate_round_alpha_;	//factor between 0 and 1 for round time estimation
 		int estimate_round_filter_;	//filter some round time samples
 		double link_capacity_;	//Link capacity
+		int debug_;	//debug more(true) or not(false)
 		
 		Tcl_Channel total_qlen_tchan_;	//place to write total_qlen records 
 		Tcl_Channel qlen_tchan_;	//place to write per-queue qlen records 

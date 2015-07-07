@@ -5,6 +5,8 @@ set service2_senders 2
 set K_port 80;	#The per-port ECN marking threshold
 set K_0 4; #The per-queue ECN marking threshold of the first queue
 set K_1 16; #The per-queue ECN marking threshold of the second queue
+set MSS_0 1460;	#MSS for service 0
+set MSS_1 1460;	#MSS for service 1
 set W_0 1; #The weight of the first queue
 set W_1 3; #The weight of the second queue
 set marking_schme 2
@@ -42,6 +44,7 @@ Queue/WRR set estimate_pktsize_alpha_ 0.75
 Queue/WRR set estimate_round_alpha_ 0.75
 Queue/WRR set estimate_round_filter_ false
 Queue/WRR set link_capacity_ $lineRate
+Queue/WRR set debug_ true
 
 set mytracefile [open mytracefile.tr w]
 $ns trace-all $mytracefile
@@ -80,6 +83,7 @@ for {set i 0} {$i<$service1_senders} {incr i} {
     $ns duplex-link $n1($i) $switch $lineRate [expr $RTT/4] DropTail
 	set tcp1($i) [new Agent/TCP/FullTcp/Sack]
 	set sink1($i) [new Agent/TCP/FullTcp/Sack]
+	$tcp1($i) set segsize_ $MSS_0
 	$tcp1($i) set serviceid_ 0
 	$sink1($i) listen
 	
@@ -104,6 +108,7 @@ for {set i 0} {$i<$service2_senders} {incr i} {
     $ns duplex-link $n2($i) $switch $lineRate [expr $RTT/4] DropTail
 	set tcp2($i) [new Agent/TCP/FullTcp/Sack]
 	set sink2($i) [new Agent/TCP/FullTcp/Sack]
+	$tcp2($i) set segsize_ $MSS_1
 	$tcp2($i) set serviceid_ 1
 	$sink2($i) listen
 	

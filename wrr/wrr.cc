@@ -84,6 +84,7 @@ WRR::WRR()
 	bind("estimate_round_alpha_",&estimate_round_alpha_);
 	bind_bool("estimate_round_filter_",&estimate_round_filter_);
 	bind_bw("link_capacity_",&link_capacity_);
+	bind_bool("debug_",&debug_);
 }
 
 WRR::~WRR() 
@@ -141,14 +142,11 @@ int WRR::MarkingECN(int q)
 	/* Our new ECN marking schemes (QUEUE_SMART_MARKING or HYBRID_SMRT_MARKING)*/
 	else if(marking_scheme_==QUEUE_SMART_MARKING||marking_scheme_==HYBRID_SMRT_MARKING)
 	{	
-		/* For QUEUE_SMART_MARKING, we calculate ECN thresholds when:
-		 * 		1. per-queue buffer occupation exceeds a pre-defined threshold 
-		 *  For HYBRID_SMRT_MARKING, we calculate ECN thresholds when:
-		 *			1. per-port buffer occupation exceeds a pre-defined threshold for 
-		 *			2. per-queue buffer occupation also exceeds a pre-defined threshold
+		/* 
+		 *  For HYBRID_SMRT_MARKING, we calculate ECN thresholds when 
+		 *  per-port buffer occupation exceeds a pre-defined threshold for 
 		 */ 
-		if((queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&marking_scheme_==QUEUE_SMART_MARKING)||
-		(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&TotalByteLength()>=port_thresh_*mean_pktsize_&&marking_scheme_==HYBRID_SMRT_MARKING))
+		if(marking_scheme_==QUEUE_SMART_MARKING||(TotalByteLength()>=port_thresh_*mean_pktsize_&&marking_scheme_==HYBRID_SMRT_MARKING))
 		{			
 			if(round_time>0.000000001&&link_capacity_>0)	//Round time>1ns
 			{
@@ -371,9 +369,9 @@ Packet *WRR::deque(void)
 						{
 							/* The packet has not been sent yet */
 							double round_time_sample=Scheduler::instance().clock()-headNode->start_time+pktSize*8/link_capacity_;
-							//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
 							round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
-							//printf("sample round time: %f round time: %f\n",round_time_sample,round_time);
+							if(debug_)
+								printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
 						}
 						headNode=RemoveHeadList(activeList);	//Remove head node from activeList
 						headNode->counter=0;
@@ -389,9 +387,9 @@ Packet *WRR::deque(void)
 					headNode->counter=0;
 					headNode->current=false;
 					double round_time_sample=Scheduler::instance().clock()-headNode->start_time;
-					//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
 				  	round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
-					//printf("sample round time: %f round time: %f\n",round_time_sample,round_time);
+					if(debug_)
+						printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
 					headNode->start_time=Scheduler::instance().clock();	//Reset start time 
 					InsertTailList(activeList, headNode);	//Insert to the tail again for next round scheduling
 				}

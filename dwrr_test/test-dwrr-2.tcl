@@ -45,11 +45,9 @@ Queue/DWRR set queue_num_ 3
 Queue/DWRR set mean_pktsize_ [expr $packetSize+40]
 Queue/DWRR set port_thresh_ $K_port
 Queue/DWRR set marking_scheme_ $marking_schme
-Queue/DWRR set round_ 3
-Queue/DWRR set round_time_ 0.0000036;	#3 MTU-sized packets
-Queue/DWRR set estimate_rate_period_ 0.00012
-Queue/DWRR set estimate_rate_alpha_ 0.25
-Queue/DWRR set estimate_round_alpha_ 0.25
+Queue/DWRR set estimate_round_alpha_ 0.75
+Queue/DWRR set link_capacity_ $lineRate
+Queue/DWRR set debug_ true
 
 set mytracefile [open mytracefile.tr w]
 $ns trace-all $mytracefile

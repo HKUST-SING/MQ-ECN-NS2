@@ -114,6 +114,7 @@ Queue/DWRR set port_thresh_ $DCTCP_K
 Queue/DWRR set estimate_round_alpha_ 0.75
 Queue/DWRR set estimate_round_filter_ false
 Queue/DWRR set link_capacity_ $link_rate$link_capacity_unit
+Queue/DWRR set debug_ false
 
 Queue/WRR set queue_num_ $service_num
 Queue/WRR set mean_pktsize_ [expr $pktSize+40]
@@ -122,6 +123,7 @@ Queue/WRR set estimate_pktsize_alpha_ 0.75
 Queue/WRR set estimate_round_alpha_ 0.75
 Queue/WRR set estimate_round_filter_ false
 Queue/WRR set link_capacity_ $link_rate$link_capacity_unit
+Queue/WRR set debug_ false
 
 if {$ECN_scheme!=4} {
 	Queue/DWRR set marking_scheme_ $ECN_scheme
