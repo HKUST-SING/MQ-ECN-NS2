@@ -22,11 +22,13 @@ struct dwrr_class
 {
 	int id; //id of this queue
 	struct Qdisc	*qdisc;	//inner FIFO queue
-	//u32	quantum;	//quantum of this queue (bytes)
 	u32	deficitCounter;	//deficit counter of this queue (bytes)
 	u8 active;	//whether the queue is not ampty (1) or not (0)
 	u8 curr;	//whether this queue is crr being served 
 	u32 len_bytes;	//queue length in bytes
+	u64 start_time_ns;	//time when this queue is inserted to active list 
+	u64 last_pkt_time_ns;	//time when this queue transmits the last packet
+	u64 last_pkt_len_ns;	//length of last packet/rate  
 	
 	struct list_head alist;	//structure of active link list
 };
@@ -41,10 +43,10 @@ struct dwrr_sched_data
 /* Variables */
 	u64 tokens;	//Tokens in nanoseconds  
 	u32 sum_len_bytes;	//The sum of lengh of all queues in bytes 
-	u32 max_len_bytes;	//Maximum buffer size in bytes
 	struct Qdisc *sch; 
 	u64	time_ns;	//Time check-point  
 	struct qdisc_watchdog watchdog;	//Watchdog timer 
+	u64 round_time_ns;	//Estimation of round time
 };
 
 /* 
@@ -118,6 +120,7 @@ static struct sk_buff* dwrr_qdisc_dequeue(struct Qdisc *sch)
 	struct dwrr_sched_data *q = qdisc_priv(sch);	
 	struct dwrr_class *cl=NULL; 
 	struct sk_buff *skb=NULL;
+	u64 sample_ns=0;
 	unsigned int len;
 	
 	/* No active queue */
@@ -172,11 +175,22 @@ static struct sk_buff* dwrr_qdisc_dequeue(struct Qdisc *sch)
 				qdisc_bstats_update(sch, skb);
 				
 				cl->deficitCounter-=len;
+				cl->last_pkt_len_ns=pkt_ns;
+				cl->last_pkt_time_ns=ktime_get_ns();
 				if(cl->qdisc->q.qlen==0)
 				{
 					cl->active=0;
 					cl->curr=0;
 					list_del(&cl->alist);
+					sample_ns=max_t(u64, cl->last_pkt_time_ns-cl->start_time_ns,cl->last_pkt_len_ns);
+					/* Smooth round time using exponential filter */ 
+					q->round_time_ns=(DWRR_QDISC_ROUND_ALPHA*q->round_time_ns+(1000-DWRR_QDISC_ROUND_ALPHA)*sample_ns)/1000;
+					/* Print necessary information in debug mode */
+					if(DWRR_QDISC_DEBUG_MODE)
+					{
+						printk(KERN_INFO "Sample round time%llu \n",sample_ns);
+						printk(KERN_INFO "Round time %llu\n",q->round_time_ns);
+					}
 				}
 				
 				//printk(KERN_INFO "Dequeue from queue %d\n",cl->id);
@@ -195,6 +209,16 @@ static struct sk_buff* dwrr_qdisc_dequeue(struct Qdisc *sch)
 		else
 		{
 			cl->curr=0;
+			sample_ns=max_t(u64, cl->last_pkt_time_ns-cl->start_time_ns,cl->last_pkt_len_ns);
+			/* Smooth round time using exponential filter */ 
+			q->round_time_ns=(DWRR_QDISC_ROUND_ALPHA*q->round_time_ns+(1000-DWRR_QDISC_ROUND_ALPHA)*sample_ns)/1000;
+			/* Print necessary information in debug mode */
+			if(DWRR_QDISC_DEBUG_MODE)
+			{
+				printk(KERN_INFO "Sample round time %llu\n",sample_ns);
+				printk(KERN_INFO "Round time %llu\n",q->round_time_ns);
+			}
+			cl->start_time_ns=ktime_get_ns();
 			list_move_tail(&cl->alist, &q->activeList);
 		}
 	}
@@ -208,11 +232,12 @@ static int dwrr_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	unsigned int len=skb_size(skb);
 	struct dwrr_sched_data *q = qdisc_priv(sch);	
 	int ret;
+	u64 ecn_thresh_bytes=0;
 	
 	cl=dwrr_qdisc_classify(skb,sch);
 	
 	/* No appropriate queue or queue limit is reached */
-	if(cl==NULL||q->sum_len_bytes+len>q->max_len_bytes)
+	if(cl==NULL||q->sum_len_bytes+len>DWRR_QDISC_SHARED_BUFFER_BYTES)
 	{
 		qdisc_qstats_drop(sch);
 		kfree_skb(skb);
@@ -223,22 +248,42 @@ static int dwrr_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 		ret=qdisc_enqueue(skb, cl->qdisc);
 		if(ret == NET_XMIT_SUCCESS) 
 		{
-			sch->q.qlen++;
-			q->sum_len_bytes+=len;
-			cl->len_bytes+=len;
-			
-			/* ECN marking */
-			if(cl->len_bytes>=DWRR_QDISC_QUEUE_ECN_THRESH[cl->id]*DWRR_QDISC_MTU_BYTES)
+			/* Per-queue ECN marking */
+			if((DWRR_QDISC_ECN_SCHEME==DWRR_QDISC_QUEUE_ECN)&&(cl->len_bytes>=DWRR_QDISC_QUEUE_ECN_THRESH[cl->id]*DWRR_QDISC_MTU_BYTES))
 			{
 				//printk(KERN_INFO "ECN marking\n");
 				dwrr_qdisc_ecn(skb);
 			}
+			/* Per-port ECN marking */
+			else if((DWRR_QDISC_ECN_SCHEME==DWRR_QDISC_PORT_ECN)&&(q->sum_len_bytes>=DWRR_QDISC_PORT_ECN_THRESH*DWRR_QDISC_MTU_BYTES))
+			{
+				dwrr_qdisc_ecn(skb);
+			}
+			/* MQ-ECN */
+			else if(DWRR_QDISC_ECN_SCHEME==DWRR_QDISC_MQ_ECN&&q->round_time_ns>0)
+			{
+				ecn_thresh_bytes=min_t(u64, DWRR_QDISC_CLASS_QUANTUM[cl->id]*8000000000/q->round_time_ns,q->rate.rate_bps)*DWRR_QDISC_PORT_ECN_THRESH*DWRR_QDISC_MTU_BYTES/q->rate.rate_bps;
+				if(cl->len_bytes>=ecn_thresh_bytes)
+				{
+					dwrr_qdisc_ecn(skb);
+				}
+				
+				if(DWRR_QDISC_DEBUG_MODE)
+				{
+					printk(KERN_INFO "queue %d quantum %d ECN threshold %llu\n", cl->id, DWRR_QDISC_CLASS_QUANTUM[cl->id],ecn_thresh_bytes); 
+				}
+			}
+			
+			sch->q.qlen++;
+			q->sum_len_bytes+=len;
+			cl->len_bytes+=len;
 			
 			if(cl->active==0)
 			{
 				cl->deficitCounter=0;
 				cl->active=1;
 				cl->curr=0;
+				cl->start_time_ns=ktime_get_ns();
 				list_add_tail(&(cl->alist),&(q->activeList));
 			}
 		}
@@ -331,8 +376,8 @@ static int dwrr_qdisc_init(struct Qdisc *sch, struct nlattr *opt)
 	
 	q->tokens=0;
 	q->time_ns=ktime_get_ns();
-	q->sum_len_bytes=0;
-	q->max_len_bytes=DWRR_QDISC_MAX_LEN_BYTES;	
+	q->sum_len_bytes=0;	//Total buffer occupation
+	q->round_time_ns=0;	//Estimation of round time
 	q->sch=sch;
 	qdisc_watchdog_init(&q->watchdog, sch);
 	INIT_LIST_HEAD(&(q->activeList));
@@ -340,7 +385,7 @@ static int dwrr_qdisc_init(struct Qdisc *sch, struct nlattr *opt)
 	for(i=0;i<DWRR_QDISC_MAX_QUEUES;i++)
 	{
 		/* bfifo is in bytes */
-		child=fifo_create_dflt(sch, &bfifo_qdisc_ops, DWRR_QDISC_MAX_LEN_BYTES);
+		child=fifo_create_dflt(sch, &bfifo_qdisc_ops, DWRR_QDISC_MAX_BUFFER_BYTES);
 		if(child!=NULL)
 			(q->queues[i]).qdisc=child;
 		else
@@ -349,11 +394,13 @@ static int dwrr_qdisc_init(struct Qdisc *sch, struct nlattr *opt)
 		/* Initialize variables for dwrr_class */
 		INIT_LIST_HEAD(&((q->queues[i]).alist));
 		(q->queues[i]).id=i;
-		//(q->queues[i]).quantum=DWRR_QDISC_CLASS_QUANTUM[i];
 		(q->queues[i]).deficitCounter=0;
 		(q->queues[i]).active=0;
 		(q->queues[i]).curr=0;
 		(q->queues[i]).len_bytes=0;
+		(q->queues[i]).start_time_ns=ktime_get_ns();
+		(q->queues[i]).last_pkt_time_ns=ktime_get_ns();
+		(q->queues[i]).last_pkt_len_ns=0;
 	}
 	return dwrr_qdisc_change(sch,opt);
 err:
