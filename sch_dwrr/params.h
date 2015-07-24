@@ -9,13 +9,23 @@
 #define DWRR_QDISC_MTU_BYTES 1538
 /* Ethernet packets with less than the minimum 64 bytes (header (14B) + user data + FCS (4B)) are padded to 64 bytes. */ 
 #define DWRR_QDISC_MIN_PKT_BYTES 64	
-/* Maximum buffer size (2MB)*/
+/* Maximum (per queue/per port shared) buffer size (2MB)*/
 #define DWRR_QDISC_MAX_BUFFER_BYTES 2000000
 
+/* Debug mode is off */
+#define	DWRR_QDISC_DEBUG_OFF 0
+/* Debug mode is on */
+#define	DWRR_QDISC_DEBUG_ON 1
+
+/* Per port shared buffer management policy */
+#define	DWRR_QDISC_SHARED_BUFFER 0
+/* Per port static buffer management policy */
+#define	DWRR_QDISC_STATIC_BUFFER 1
+
 /* Disable ECN marking */
-#define DWRR_QDISC_DISABLE_ECN 0
+#define	DWRR_QDISC_DISABLE_ECN 0
 /* Per queue ECN marking */
-#define DWRR_QDISC_QUEUE_ECN 1
+#define	DWRR_QDISC_QUEUE_ECN 1
 /* Per port ECN marking */
 #define DWRR_QDISC_PORT_ECN 2
 /* Our scheme: MQ-ECN */
@@ -23,6 +33,8 @@
 
 /* Debug mode or not */
 extern int DWRR_QDISC_DEBUG_MODE;
+/* Buffer management mode: shared (0) or static (1)*/
+extern int DWRR_QDISC_BUFFER_MODE;
 /* Per port shared buffer (bytes) */
 extern int DWRR_QDISC_SHARED_BUFFER_BYTES;
 /* Bucket size in nanosecond*/
@@ -36,10 +48,12 @@ extern int DWRR_QDISC_ROUND_ALPHA;
 
 /* Per queue ECN marking threshold (MTU) */
 extern int DWRR_QDISC_QUEUE_ECN_THRESH[DWRR_QDISC_MAX_QUEUES];
-/* DSCP value for different traffic classes */
-extern int DWRR_QDISC_CLASS_DSCP[DWRR_QDISC_MAX_QUEUES];
-/* Quantum for different traffic classes */ 
-extern int DWRR_QDISC_CLASS_QUANTUM[DWRR_QDISC_MAX_QUEUES];
+/* DSCP value for different queues */
+extern int DWRR_QDISC_QUEUE_DSCP[DWRR_QDISC_MAX_QUEUES];
+/* Quantum for different queues*/ 
+extern int DWRR_QDISC_QUEUE_QUANTUM[DWRR_QDISC_MAX_QUEUES];
+/* Per queue minimum guarantee buffer (bytes) */
+extern int DWRR_QDISC_QUEUE_BUFFER_BYTES[DWRR_QDISC_MAX_QUEUES];
 
 struct DWRR_QDISC_Param
 {
@@ -47,7 +61,7 @@ struct DWRR_QDISC_Param
 	int *ptr;
 };
 
-extern struct DWRR_QDISC_Param DWRR_QDISC_Params[6+3*DWRR_QDISC_MAX_QUEUES+1];	
+extern struct DWRR_QDISC_Param DWRR_QDISC_Params[7+4*DWRR_QDISC_MAX_QUEUES+1];	
 
 /* Intialize parameters and register sysctl */
 int dwrr_qdisc_params_init(void);
