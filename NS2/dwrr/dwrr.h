@@ -12,10 +12,10 @@
 #define PER_QUEUE_MARKING 0
 /* Per-port ECN marking */
 #define PER_PORT_MARKING 1
-/* Dynamic per-queue ECN marking scheme */
-#define QUEUE_SMART_MARKING 2
-/* Dynamic hybrid (per-queue+per-port) ECN marking scheme */
-#define HYBRID_SMRT_MARKING 3
+/* MQ-ECN for round robin packet scheduling algorithms */
+#define MQ_MARKING_RR 2
+/* MQ-ECN for any packet scheduling algorithms */
+#define MQ_MARKING_GENER 3
 
 class PacketDWRR;
 class DWRR;
@@ -54,7 +54,10 @@ class DWRR : public Queue
 		/* Variables */
 		PacketDWRR *queues;	//underlying multi-FIFO (CoS) queues
 		PacketDWRR *activeList;	//list for active queues	
-		double round_time;	//Round time estimation value
+		double round_time;	//estimation value for round time 
+		double quantum_sum_estimate;	//estimation value for sum of quantums of all non-empty  queues
+		int quantum_sum;	//sum of quantums of all non-empty queues in activeList
+		
 		bool init;
 		
 		int queue_num_;	//number of queues 
@@ -62,6 +65,7 @@ class DWRR : public Queue
 		double port_thresh_;	//per-port ECN marking threshold (pkts)
 		int marking_scheme_;	//ECN marking policy 
 		double estimate_round_alpha_;	//factor between 0 and 1 for round time estimation
+		double estimate_quantum_alpha_;	//factor between 0 and 1 for quantum estimation
 		int estimate_round_filter_;	//filter some round time samples
 		double link_capacity_;	//Link capacity
 		int debug_;	//debug more(true) or not(false)

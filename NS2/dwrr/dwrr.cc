@@ -72,6 +72,8 @@ DWRR::DWRR()
 	activeList=new PacketDWRR();
 	init=false;
 	round_time=0;
+	quantum_sum=0;
+	quantum_sum_estimate=0;
 	
 	total_qlen_tchan_=NULL;
 	qlen_tchan_=NULL;
@@ -82,6 +84,7 @@ DWRR::DWRR()
 	bind("port_thresh_",&port_thresh_);
 	bind("marking_scheme_",&marking_scheme_);
 	bind("estimate_round_alpha_",&estimate_round_alpha_);
+	bind("estimate_quantum_alpha_",&estimate_quantum_alpha_);
 	bind_bool("estimate_round_filter_",&estimate_round_filter_);
 	bind_bw("link_capacity_",&link_capacity_);
 	bind_bool("debug_",&debug_);
@@ -151,33 +154,38 @@ int DWRR::MarkingECN(int q)
 		else
 			return 0;
 	}
-	/* Our new ECN marking schemes (QUEUE_SMART_MARKING or HYBRID_SMRT_MARKING)*/
-	else if(marking_scheme_==QUEUE_SMART_MARKING||marking_scheme_==HYBRID_SMRT_MARKING)
+	/* MQ-ECN for round robin packet scheduling algorithms */
+	else if(marking_scheme_==MQ_MARKING_RR)
 	{	
-		/* For QUEUE_SMART_MARKING, we calculate ECN thresholds when:
-		 * 		1. per-queue buffer occupation exceeds a pre-defined threshold 
-		 *  For HYBRID_SMRT_MARKING, we calculate ECN thresholds when:
-		 *			1. per-port buffer occupation exceeds a pre-defined threshold for 
-		 *			2. per-queue buffer occupation also exceeds a pre-defined threshold
-		 */ 
-		if((queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&marking_scheme_==QUEUE_SMART_MARKING)||
-		(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&TotalByteLength()>=port_thresh_*mean_pktsize_&&marking_scheme_==HYBRID_SMRT_MARKING))
+		if(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&round_time>0.000000001&&link_capacity_>0)
 		{			
-			if(round_time>0.000000001&&link_capacity_>0)	//Round time>1ns
-			{
-				double weightedFairRate=queues[q].quantum*8/round_time;
-				double thresh=min(weightedFairRate/link_capacity_,1)*port_thresh_;
-				//For debug
-				//printf("round time: %f threshold: %f\n",round_time, thresh);
-				if(queues[q].byteLength()>thresh*mean_pktsize_)
-					return 1;
-				else
-					return 0;
-			}
+			double weightedFairRate=queues[q].quantum*8/round_time;
+			double thresh=min(weightedFairRate/link_capacity_,1)*port_thresh_;
+			//For debug
+			//printf("round time: %f threshold: %f\n",round_time, thresh);
+			if(queues[q].byteLength()>thresh*mean_pktsize_)
+				return 1;
 			else
-			{
 				return 0;
-			}
+		}
+		else
+		{
+			return 0;
+		}
+	}
+	/* MQ-ECN for any packet scheduling algorithms */
+	else if(marking_scheme_==MQ_MARKING_GENER)
+	{
+		if(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&quantum_sum>0)
+		{
+			quantum_sum_estimate=quantum_sum_estimate*estimate_quantum_alpha_+quantum_sum*(1-estimate_quantum_alpha_);
+			if(debug_)
+				printf("sample quantum sum: %d smooth quantum sum: %f\n",quantum_sum,quantum_sum_estimate);
+			double thresh=min(queues[q].quantum/quantum_sum_estimate,1)*port_thresh_;
+			if(queues[q].byteLength()>thresh*mean_pktsize_)
+				return 1;
+			else
+				return 0;
 		}
 		else
 		{
@@ -316,11 +324,7 @@ void DWRR::enque(Packet *p)
 	if(prio>=queue_num_||prio<0)
 		prio=queue_num_-1;
 
-	/* Enqueue ECN marking */
-	queues[prio].enque(p); 			
-	if(MarkingECN(prio)>0&&hf->ect())	
-		hf->ce() = 1;
-		
+	queues[prio].enque(p); 	
 	/* if queues[prio] is not in activeList */
 	if(queues[prio].active==false)
 	{
@@ -329,7 +333,12 @@ void DWRR::enque(Packet *p)
 		queues[prio].current=false;
 		queues[prio].start_time=Scheduler::instance().clock();	//Start time of this round
 		InsertTailList(activeList, &queues[prio]);
+		quantum_sum+=queues[prio].quantum;
 	}
+	
+	/* Enqueue ECN marking */
+	if(MarkingECN(prio)>0&&hf->ect())	
+		hf->ce() = 1;
 	
 	trace_qlen();
 	trace_total_qlen();
@@ -380,9 +389,10 @@ Packet *DWRR::deque(void)
 							/* The packet has not been sent yet */
 							double round_time_sample=Scheduler::instance().clock()-headNode->start_time+pktSize*8/link_capacity_;
 							round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
-							if(debug_)	
+							if(debug_&&marking_scheme_==MQ_MARKING_RR)	
 								printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
 						}
+						quantum_sum-=headNode->quantum;
 						headNode=RemoveHeadList(activeList);	//Remove head node from activeList
 						headNode->deficitCounter=0;
 						headNode->active=false;
@@ -398,7 +408,7 @@ Packet *DWRR::deque(void)
 					double round_time_sample=Scheduler::instance().clock()-headNode->start_time;
 					//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
 				  	round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
-					if(debug_)	
+					if(debug_&&marking_scheme_==MQ_MARKING_RR)	
 						printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
 					headNode->start_time=Scheduler::instance().clock();	//Reset start time 
 					InsertTailList(activeList, headNode);
