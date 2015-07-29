@@ -45,7 +45,8 @@ Queue/WFQ set queue_num_ 3
 Queue/WFQ set mean_pktsize_ $packetSize
 Queue/WFQ set port_thresh_ $K_port
 Queue/WFQ set marking_scheme_ $marking_schme
-Queue/WFQ set backlogged_in_bytes_ false
+Queue/WFQ set estimate_weight_alpha_ 0.75
+Queue/WFQ set debug_ true
 
 set mytracefile [open mytracefile.tr w]
 $ns trace-all $mytracefile

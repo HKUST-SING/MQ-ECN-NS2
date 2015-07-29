@@ -24,13 +24,16 @@ WFQ::WFQ()
 	mean_pktsize_=1500;
 	port_thresh_=65;
 	marking_scheme_=0;
+	weight_sum=0;
+	weight_sum_estimate=0;
 	
 	/* bind variables */
 	bind("queue_num_", &queue_num_);
 	bind("mean_pktsize_", &mean_pktsize_);
 	bind("port_thresh_",&port_thresh_);
 	bind("marking_scheme_",&marking_scheme_);
-	bind_bool("backlogged_in_bytes_",&backlogged_in_bytes_);
+	bind("estimate_weight_alpha_",&estimate_weight_alpha_);
+	bind_bool("debug_",&debug_);
 
 	currTime=0.0;
 	total_qlen_tchan_=NULL;
@@ -91,45 +94,19 @@ int WFQ::MarkingECN(int q)
 		else
 			return 0;
 	}
-	/* Our new ECN marking schemes (QUEUE_SMART_MARKING or HYBRID_SMRT_MARKING)*/
-	else if(marking_scheme_==QUEUE_SMART_MARKING||marking_scheme_==HYBRID_SMRT_MARKING)
+	/* MQ-ECN for any packet scheduling algorithms */
+	else if(marking_scheme_==MQ_MARKING_GENER)
 	{	
-		/* For QUEUE_SMART_MARKING, we calculate ECN thresholds when:
-		  * 		1. per-queue buffer occupation exceeds a pre-defined threshold 
-		 *  For HYBRID_SMRT_MARKING, we calculate ECN thresholds when:
-		 *			1. per-port buffer occupation exceeds a pre-defined threshold for 
-		 *			2. per-queue buffer occupation also exceeds a pre-defined threshold
-		 */ 
-		if((qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_&&marking_scheme_==QUEUE_SMART_MARKING)||
-		(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_&&TotalByteLength()>=port_thresh_*mean_pktsize_&&marking_scheme_==HYBRID_SMRT_MARKING))
+		if(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_&&weight_sum>0)
 		{
-			double weights=0;
-			double thresh=0;
-		
-			/* Find all 'busy' (backlogged) queues and get the sum of their weights */
-			for(int i=0;i<queue_num_;i++)
-			{
-				/* Determine whether a queue is backlogged: 
-				 * if backlogged_in_bytes_ is set, qlen_in_bytes>=2*MTU
-				 * otherwise, qlen_in_pkts>=2
-				 */
-				if((backlogged_in_bytes_&&qs[i].q_->byteLength()>=2*mean_pktsize_)||
-				(!backlogged_in_bytes_&&qs[i].q_->length()>=2))
-					weights+=qs[i].weight;
-			}
-	
-			if(weights>0)
-			{
-				thresh=qs[q].weight*port_thresh_/weights;
-				if(qs[q].q_->byteLength()>=thresh*mean_pktsize_)
-					return 1;
-				else 
-					return 0;
-			}
+			weight_sum_estimate=weight_sum_estimate*estimate_weight_alpha_+weight_sum*(1-estimate_weight_alpha_);
+			if(debug_)
+				printf("sample weight sum: %f smooth weight sum: %f\n",weight_sum,weight_sum_estimate);
+			double thresh=min(qs[q].weight/weight_sum_estimate,1)*port_thresh_;
+			if(qs[q].q_->byteLength()>thresh*mean_pktsize_)
+				return 1;
 			else
-			{
 				return 0;
-			}
 		}
 		else
 		{
@@ -262,6 +239,7 @@ void WFQ::enque(Packet *p)
 	/* If queue for the flow is empty, calculate headFinishTime and currTime */
 	if(qs[prio].q_->length()==0)
 	{
+		weight_sum+=qs[prio].weight;
 		if(qs[prio].weight>0)
 		{
 			qs[prio].headFinishTime=currTime+pktSize/qs[prio].weight ;
@@ -276,10 +254,10 @@ void WFQ::enque(Packet *p)
 	}
 	
 	/* Enqueue ECN marking */
+	qs[prio].q_->enque(p);
 	if(MarkingECN(prio)>0&&hf->ect())
 		hf->ce() = 1;
-	
-	qs[prio].q_->enque(p); 		
+		 	
 	trace_qlen();
 	trace_total_qlen();
 }
@@ -332,9 +310,10 @@ Packet *WFQ::deque(void)
 			exit(1);
 		}
 	}
-	/* No remaining packet in this queue */
+	/* After dequeue, the queue becomes empty */
 	else
 	{
+		weight_sum-=qs[queue].weight;
 		qs[queue].headFinishTime=LDBL_MAX;
 	}
 			
