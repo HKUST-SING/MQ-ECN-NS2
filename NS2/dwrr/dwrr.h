@@ -12,10 +12,10 @@
 #define PER_QUEUE_MARKING 0
 /* Per-port ECN marking */
 #define PER_PORT_MARKING 1
-/* MQ-ECN for round robin packet scheduling algorithms */
-#define MQ_MARKING_RR 2
 /* MQ-ECN for any packet scheduling algorithms */
-#define MQ_MARKING_GENER 3
+#define MQ_MARKING_GENER 2
+/* MQ-ECN for round robin packet scheduling algorithms */
+#define MQ_MARKING_RR 3
 
 class PacketDWRR;
 class DWRR;

@@ -154,15 +154,15 @@ int DWRR::MarkingECN(int q)
 		else
 			return 0;
 	}
-	/* MQ-ECN for round robin packet scheduling algorithms */
-	else if(marking_scheme_==MQ_MARKING_RR)
-	{	
-		if(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&round_time>0.000000001&&link_capacity_>0)
-		{			
-			double weightedFairRate=queues[q].quantum*8/round_time;
-			double thresh=min(weightedFairRate/link_capacity_,1)*port_thresh_;
-			//For debug
-			//printf("round time: %f threshold: %f\n",round_time, thresh);
+	/* MQ-ECN for any packet scheduling algorithms */
+	else if(marking_scheme_==MQ_MARKING_GENER)
+	{
+		if(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&quantum_sum>0)
+		{
+			quantum_sum_estimate=quantum_sum_estimate*estimate_quantum_alpha_+quantum_sum*(1-estimate_quantum_alpha_);
+			if(debug_)
+				printf("sample quantum sum: %d smooth quantum sum: %f\n",quantum_sum,quantum_sum_estimate);
+			double thresh=min(queues[q].quantum/quantum_sum_estimate,1)*port_thresh_;
 			if(queues[q].byteLength()>thresh*mean_pktsize_)
 				return 1;
 			else
@@ -173,15 +173,15 @@ int DWRR::MarkingECN(int q)
 			return 0;
 		}
 	}
-	/* MQ-ECN for any packet scheduling algorithms */
-	else if(marking_scheme_==MQ_MARKING_GENER)
-	{
-		if(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&quantum_sum>0)
-		{
-			quantum_sum_estimate=quantum_sum_estimate*estimate_quantum_alpha_+quantum_sum*(1-estimate_quantum_alpha_);
-			if(debug_)
-				printf("sample quantum sum: %d smooth quantum sum: %f\n",quantum_sum,quantum_sum_estimate);
-			double thresh=min(queues[q].quantum/quantum_sum_estimate,1)*port_thresh_;
+	/* MQ-ECN for round robin packet scheduling algorithms */
+	else if(marking_scheme_==MQ_MARKING_RR)
+	{	
+		if(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&round_time>0.000000001&&link_capacity_>0)
+		{			
+			double weightedFairRate=queues[q].quantum*8/round_time;
+			double thresh=min(weightedFairRate/link_capacity_,1)*port_thresh_;
+			//For debug
+			//printf("round time: %f threshold: %f\n",round_time, thresh);
 			if(queues[q].byteLength()>thresh*mean_pktsize_)
 				return 1;
 			else
