@@ -46,7 +46,8 @@ set fct_log [lindex $argv 25]
 
 set pktSize 1460;	#packet size in bytes
 set quantum [expr $pktSize+40];	#quantum for each queue (DWRR)
-set weight 1; #weight for each queue (WRR)
+set wrr_weight 1; #weight for each queue (WRR)
+set wfq_weight 100000; #weight for each queue (WFQ)
 set link_capacity_unit Gb
 
 puts "Simulation input:" 
@@ -112,9 +113,16 @@ Queue/DWRR set queue_num_ $service_num
 Queue/DWRR set mean_pktsize_ [expr $pktSize+40]
 Queue/DWRR set port_thresh_ $DCTCP_K
 Queue/DWRR set estimate_round_alpha_ 0.75
+Queue/DWRR set estimate_quantum_alpha_ 0.75
 Queue/DWRR set estimate_round_filter_ false
 Queue/DWRR set link_capacity_ $link_rate$link_capacity_unit
 Queue/DWRR set debug_ false
+
+Queue/WFQ set queue_num_ $service_num
+Queue/WFQ set mean_pktsize_ [expr $pktSize+40]
+Queue/WFQ set port_thresh_ $DCTCP_K
+Queue/WFQ set estimate_weight_alpha_ 0.75
+Queue/WFQ set debug_ false
 
 Queue/WRR set queue_num_ $service_num
 Queue/WRR set mean_pktsize_ [expr $pktSize+40]
@@ -127,10 +135,12 @@ Queue/WRR set debug_ false
 
 if {$ECN_scheme!=4} {
 	Queue/DWRR set marking_scheme_ $ECN_scheme
+	Queue/WFQ set marking_scheme_ $ECN_scheme
 	Queue/WRR set marking_scheme_ $ECN_scheme
 } else {
 	#Per-queue-min 
 	Queue/DWRR set marking_scheme_ 0
+	Queue/WFQ set marking_scheme_ 0
 	Queue/WRR set marking_scheme_ 0
 }
 
@@ -167,19 +177,22 @@ for {set i 0} {$i < $S} {incr i} {
     set j [expr $i/$topology_spt]
     $ns duplex-link $s($i) $n($j) [set link_rate]Gb [expr $host_delay + $mean_link_delay]  $switchAlg   
 	
-##### Configure DWRR/WRR #####
+##### Configure DWRR/WRR/WFQ for edge links #####
 	
 	set L [$ns link $s($i) $n($j)] 
 	set q [$L set queue_]
-	$q set link_capacity_ $link_rate$link_capacity_unit
+	#$q set link_capacity_ $link_rate$link_capacity_unit
 	
 	for {set service_i 0} {$service_i < $service_num} {incr service_i} {
 		if {[string compare $switchAlg "DWRR"] == 0} {
 			$q set-quantum $service_i $quantum 
 		} elseif {[string compare $switchAlg "WRR"] == 0} {
-			$q set-weight $service_i $weight
+			$q set-weight $service_i $wrr_weight
+		} elseif {[string compare $switchAlg "WFQ"] == 0} {
+			$q set-weight $service_i $wfq_weight
 		}
-		#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
+		
+		#MQ_MARKING_GENER (2), MQ_MARKING_RR (3) and Per-queue Minimum (4)
 		if {$ECN_scheme>=2} {
 			$q set-thresh $service_i [expr $DCTCP_K/$service_num]
 		} else {
@@ -189,15 +202,18 @@ for {set i 0} {$i < $S} {incr i} {
 	
 	set L [$ns link $n($j) $s($i)] 
 	set q [$L set queue_]
-	$q set link_capacity_ $link_rate$link_capacity_unit
+	#$q set link_capacity_ $link_rate$link_capacity_unit
 	
 	for {set service_i 0} {$service_i < $service_num} {incr service_i} {
 		if {[string compare $switchAlg "DWRR"] == 0} {
 			$q set-quantum $service_i $quantum 
 		} elseif {[string compare $switchAlg "WRR"] == 0} {
-			$q set-weight $service_i $weight
+			$q set-weight $service_i $wrr_weight
+		} elseif {[string compare $switchAlg "WFQ"] == 0} {
+			$q set-weight $service_i $wfq_weight
 		}
-		#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
+		
+		#MQ_MARKING_GENER (2), MQ_MARKING_RR (3) and Per-queue Minimum (4)
 		if {$ECN_scheme>=2} {
 			$q set-thresh $service_i [expr $DCTCP_K/$service_num]
 		} else {
@@ -210,19 +226,24 @@ for {set i 0} {$i < $topology_tors} {incr i} {
     for {set j 0} {$j < $topology_spines} {incr j} {
 		$ns duplex-link $n($i) $a($j) [set UCap]Gb $mean_link_delay $switchAlg 
 	
-##### Configure DWRR/WRR #####
+##### Configure DWRR/WRR/WFQ for core links #####
 	
 		set L [$ns link $n($i) $a($j)] 
 		set q [$L set queue_]
-		$q set link_capacity_ $UCap$link_capacity_unit
-			
+		if {[string compare $switchAlg "DWRR"] == 0 || [string compare $switchAlg "WRR"] == 0} {
+			$q set link_capacity_ $UCap$link_capacity_unit
+		}
+		
 		for {set service_i 0} {$service_i < $service_num} {incr service_i} {
 			if {[string compare $switchAlg "DWRR"] == 0} {
 				$q set-quantum $service_i $quantum 
 			} elseif {[string compare $switchAlg "WRR"] == 0} {
-				$q set-weight $service_i $weight
+				$q set-weight $service_i $wrr_weight
+			} elseif {[string compare $switchAlg "WFQ"] == 0} {
+				$q set-weight $service_i $wfq_weight
 			}
-			#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
+			
+			#MQ_MARKING_GENER (2), MQ_MARKING_RR (3) and Per-queue Minimum (4)
 			if {$ECN_scheme>=2} {
 				$q set-thresh $service_i [expr $DCTCP_K/$service_num]
 			} else {
@@ -232,15 +253,20 @@ for {set i 0} {$i < $topology_tors} {incr i} {
 	
 		set L [$ns link $a($j) $n($i)] 
 		set q [$L set queue_]
-		$q set link_capacity_ $UCap$link_capacity_unit
+		if {[string compare $switchAlg "DWRR"] == 0 || [string compare $switchAlg "WRR"] == 0} {
+			$q set link_capacity_ $UCap$link_capacity_unit
+		}
 				
 		for {set service_i 0} {$service_i < $service_num} {incr service_i} {
 			if {[string compare $switchAlg "DWRR"] == 0} {
 				$q set-quantum $service_i $quantum 
 			} elseif {[string compare $switchAlg "WRR"] == 0} {
-				$q set-weight $service_i $weight
+				$q set-weight $service_i $wrr_weight
+			} elseif {[string compare $switchAlg "WFQ"] == 0} {
+				$q set-weight $service_i $wfq_weight
 			}
-			#dynamic per-queue (2), dynamic hybrid (3) and per-queue-min (4)
+			
+			#MQ_MARKING_GENER (2), MQ_MARKING_RR (3) and Per-queue Minimum (4)
 			if {$ECN_scheme>=2} {
 				$q set-thresh $service_i [expr $DCTCP_K/$service_num]
 			} else {
