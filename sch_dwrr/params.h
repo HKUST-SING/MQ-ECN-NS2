@@ -28,8 +28,10 @@
 #define	DWRR_QDISC_QUEUE_ECN 1
 /* Per port ECN marking */
 #define DWRR_QDISC_PORT_ECN 2
-/* Our scheme: MQ-ECN */
-#define DWRR_QDISC_MQ_ECN 3
+/* MQ-ECN for any packet scheduling algorithm */
+#define DWRR_QDISC_MQ_ECN_GENER 3
+/* MQ-ECN for round-robin packet scheduling algorithms */
+#define DWRR_QDISC_MQ_ECN_RR 4
 
 /* Debug mode or not */
 extern int DWRR_QDISC_DEBUG_MODE;
@@ -43,6 +45,8 @@ extern int DWRR_QDISC_BUCKET_NS;
 extern int DWRR_QDISC_PORT_ECN_THRESH;
 /* ECN marking scheme */
 extern int DWRR_QDISC_ECN_SCHEME;
+/* Alpha for quantum sum estimation */
+extern int DWRR_QDISC_QUANTUM_ALPHA;
 /* Alpha for round time estimation */
 extern int DWRR_QDISC_ROUND_ALPHA;
 
@@ -52,7 +56,7 @@ extern int DWRR_QDISC_QUEUE_ECN_THRESH[DWRR_QDISC_MAX_QUEUES];
 extern int DWRR_QDISC_QUEUE_DSCP[DWRR_QDISC_MAX_QUEUES];
 /* Quantum for different queues*/ 
 extern int DWRR_QDISC_QUEUE_QUANTUM[DWRR_QDISC_MAX_QUEUES];
-/* Per queue minimum guarantee buffer (bytes) */
+/* Per queue static reserved buffer (bytes) */
 extern int DWRR_QDISC_QUEUE_BUFFER_BYTES[DWRR_QDISC_MAX_QUEUES];
 
 struct DWRR_QDISC_Param
@@ -61,7 +65,7 @@ struct DWRR_QDISC_Param
 	int *ptr;
 };
 
-extern struct DWRR_QDISC_Param DWRR_QDISC_Params[7+4*DWRR_QDISC_MAX_QUEUES+1];	
+extern struct DWRR_QDISC_Param DWRR_QDISC_Params[8+4*DWRR_QDISC_MAX_QUEUES+1];	
 
 /* Intialize parameters and register sysctl */
 int dwrr_qdisc_params_init(void);
