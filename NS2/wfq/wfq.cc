@@ -81,7 +81,7 @@ int WFQ::MarkingECN(int q)
 	/* Per-queue ECN marking */
 	if(marking_scheme_==PER_QUEUE_MARKING)
 	{
-		if(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_)
+		if(qs[q].q_->byteLength()>qs[q].thresh*mean_pktsize_)
 			return 1;
 		else
 			return 0;
@@ -89,7 +89,7 @@ int WFQ::MarkingECN(int q)
 	/* Per-port ECN marking */
 	else if(marking_scheme_==PER_PORT_MARKING)
 	{
-		if(TotalByteLength()>=port_thresh_*mean_pktsize_)
+		if(TotalByteLength()>port_thresh_*mean_pktsize_)
 			return 1;
 		else
 			return 0;
@@ -97,11 +97,8 @@ int WFQ::MarkingECN(int q)
 	/* MQ-ECN for any packet scheduling algorithms */
 	else if(marking_scheme_==MQ_MARKING_GENER)
 	{	
-		if(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_&&weight_sum>0)
+		if(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_&&weight_sum_estimate>0)
 		{
-			weight_sum_estimate=weight_sum_estimate*estimate_weight_alpha_+weight_sum*(1-estimate_weight_alpha_);
-			if(debug_)
-				printf("sample weight sum: %f smooth weight sum: %f\n",weight_sum,weight_sum_estimate);
 			double thresh=min(qs[q].weight/weight_sum_estimate,1)*port_thresh_;
 			if(qs[q].q_->byteLength()>thresh*mean_pktsize_)
 				return 1;
@@ -193,7 +190,7 @@ int WFQ::command(int argc, const char*const* argv)
 			int queue_id=atoi(argv[2]);
 			if(queue_id<queue_num_&&queue_id>=0)
 			{
-				int thresh=atoi(argv[3]);
+				double thresh=atof(argv[3]);
 				if(thresh>=0)
 				{
 					qs[queue_id].thresh=thresh;
@@ -253,6 +250,11 @@ void WFQ::enque(Packet *p)
 		}
 	}
 	
+	/* Update weight_sum_estimate */
+	weight_sum_estimate=weight_sum_estimate*estimate_weight_alpha_+weight_sum*(1-estimate_weight_alpha_);
+	if(debug_)
+		printf("sample weight sum: %f smooth weight sum: %f\n",weight_sum,weight_sum_estimate);
+	
 	/* Enqueue ECN marking */
 	qs[prio].q_->enque(p);
 	if(MarkingECN(prio)>0&&hf->ect())
@@ -269,7 +271,7 @@ Packet *WFQ::deque(void)
 	long double minT=LDBL_MAX ;
 	int queue=-1;
 	int tot_len=TotalByteLength();
-	
+		
 	/* look for the candidate queue with the earliest virtual finish time */
 	for(i=0; i<queue_num_; i++)
 	{
@@ -293,7 +295,7 @@ Packet *WFQ::deque(void)
 	
 	pkt=qs[queue].q_->deque();
 	pktSize=hdr_cmn::access(pkt)->size();
-	  
+	 
 	/* Set the headFinishTime for the remaining head packet in the queue */
 	nextPkt=qs[queue].q_->head();
 	if (nextPkt!=NULL) 
@@ -316,7 +318,12 @@ Packet *WFQ::deque(void)
 		weight_sum-=qs[queue].weight;
 		qs[queue].headFinishTime=LDBL_MAX;
 	}
-			
+	
+	/* Update weight_sum_estimate */
+	weight_sum_estimate=weight_sum_estimate*estimate_weight_alpha_+weight_sum*(1-estimate_weight_alpha_);
+	if(debug_)
+		printf("sample weight sum: %f smooth weight sum: %f\n",weight_sum,weight_sum_estimate);
+	
 	return pkt;
 }
 

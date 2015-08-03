@@ -157,11 +157,8 @@ int DWRR::MarkingECN(int q)
 	/* MQ-ECN for any packet scheduling algorithms */
 	else if(marking_scheme_==MQ_MARKING_GENER)
 	{
-		if(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&quantum_sum>0)
+		if(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&quantum_sum_estimate>0)
 		{
-			quantum_sum_estimate=quantum_sum_estimate*estimate_quantum_alpha_+quantum_sum*(1-estimate_quantum_alpha_);
-			if(debug_)
-				printf("sample quantum sum: %d smooth quantum sum: %f\n",quantum_sum,quantum_sum_estimate);
 			double thresh=min(queues[q].quantum/quantum_sum_estimate,1)*port_thresh_;
 			if(queues[q].byteLength()>thresh*mean_pktsize_)
 				return 1;
@@ -336,6 +333,11 @@ void DWRR::enque(Packet *p)
 		quantum_sum+=queues[prio].quantum;
 	}
 	
+	/* Update quantum_sum on enque */
+	quantum_sum_estimate=quantum_sum_estimate*estimate_quantum_alpha_+quantum_sum*(1-estimate_quantum_alpha_);
+	if(debug_&&marking_scheme_==MQ_MARKING_GENER)
+		printf("sample quantum sum: %d smooth quantum sum: %f\n",quantum_sum,quantum_sum_estimate);
+			
 	/* Enqueue ECN marking */
 	if(MarkingECN(prio)>0&&hf->ect())	
 		hf->ce() = 1;
@@ -398,6 +400,10 @@ Packet *DWRR::deque(void)
 						headNode->active=false;
 						headNode->current=false;
 					}
+					/* Update quantum_sum on deque */
+					quantum_sum_estimate=quantum_sum_estimate*estimate_quantum_alpha_+quantum_sum*(1-estimate_quantum_alpha_);
+					if(debug_&&marking_scheme_==MQ_MARKING_GENER)
+						printf("sample quantum sum: %d smooth quantum sum: %f\n",quantum_sum,quantum_sum_estimate);
 					break;
 				}
 				/* if we don't have enough quantum to dequeue the head packet and the queue is not empty */
