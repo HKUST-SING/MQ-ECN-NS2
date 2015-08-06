@@ -8,11 +8,11 @@
 #define max(arg1,arg2) (arg1>arg2 ? arg1 : arg2)
 #define min(arg1,arg2) (arg1<arg2 ? arg1 : arg2)
 
-static class WFQClass : public TclClass 
+static class WFQClass : public TclClass
 {
 	public:
 		WFQClass() : TclClass("Queue/WFQ") {}
-		TclObject* create(int argc, const char*const* argv) 
+		TclObject* create(int argc, const char*const* argv)
 		{
 			return (new WFQ);
 		}
@@ -26,7 +26,7 @@ WFQ::WFQ()
 	marking_scheme_=0;
 	weight_sum=0;
 	weight_sum_estimate=0;
-	
+
 	/* bind variables */
 	bind("queue_num_", &queue_num_);
 	bind("mean_pktsize_", &mean_pktsize_);
@@ -38,7 +38,7 @@ WFQ::WFQ()
 	currTime=0.0;
 	total_qlen_tchan_=NULL;
 	qlen_tchan_=NULL;
-	
+
 	/* Initialize queue states */
 	qs=new QueueState[WFQ_MAX_QUEUES];
 	for(int i=0;i<WFQ_MAX_QUEUES;i++)
@@ -49,7 +49,7 @@ WFQ::WFQ()
 	}
 }
 
-WFQ::~WFQ() 
+WFQ::~WFQ()
 {
 	for(int i=0;i<WFQ_MAX_QUEUES;i++)
 	{
@@ -71,13 +71,13 @@ int WFQ::TotalByteLength()
 
 /* Determine whether we need to mark ECN where q is current queue number. Return 1 if it requires marking */
 int WFQ::MarkingECN(int q)
-{	
+{
 	if(q<0||q>=queue_num_)
 	{
 		fprintf (stderr,"illegal queue number\n");
 		exit (1);
 	}
-	
+
 	/* Per-queue ECN marking */
 	if(marking_scheme_==PER_QUEUE_MARKING)
 	{
@@ -96,7 +96,7 @@ int WFQ::MarkingECN(int q)
 	}
 	/* MQ-ECN for any packet scheduling algorithms */
 	else if(marking_scheme_==MQ_MARKING_GENER)
-	{	
+	{
 		if(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_&&weight_sum_estimate>0)
 		{
 			double thresh=min(qs[q].weight/weight_sum_estimate,1)*port_thresh_;
@@ -118,9 +118,9 @@ int WFQ::MarkingECN(int q)
 	}
 }
 
-/* 
+/*
  *  entry points from OTcL to set per queue state variables
- *   - $q set-weight queue_id queue_weight	
+ *   - $q set-weight queue_id queue_weight
  *   - $q set-thresh queue_id queue_thresh
  *   - $q attach-total file
  *	  - $q attach-queue file
@@ -132,26 +132,26 @@ int WFQ::command(int argc, const char*const* argv)
 	if(argc==3)
 	{
 		// attach a file to trace total queue length
-		if (strcmp(argv[1], "attach-total") == 0) 
+		if (strcmp(argv[1], "attach-total") == 0)
 		{
 			int mode;
 			const char* id = argv[2];
 			Tcl& tcl = Tcl::instance();
 			total_qlen_tchan_=Tcl_GetChannel(tcl.interp(), (char*)id, &mode);
-			if (total_qlen_tchan_==0) 
+			if (total_qlen_tchan_==0)
 			{
 				tcl.resultf("WFQ: trace: can't attach %s for writing", id);
 				return (TCL_ERROR);
 			}
 			return (TCL_OK);
 		}
-		else if (strcmp(argv[1], "attach-queue") == 0) 
+		else if (strcmp(argv[1], "attach-queue") == 0)
 		{
 			int mode;
 			const char* id = argv[2];
 			Tcl& tcl = Tcl::instance();
 			qlen_tchan_=Tcl_GetChannel(tcl.interp(), (char*)id, &mode);
-			if (qlen_tchan_==0) 
+			if (qlen_tchan_==0)
 			{
 				tcl.resultf("WFQ: trace: can't attach %s for writing", id);
 				return (TCL_ERROR);
@@ -159,9 +159,9 @@ int WFQ::command(int argc, const char*const* argv)
 			return (TCL_OK);
 		}
 	}
-	else if (argc == 4) 
+	else if (argc == 4)
 	{
-		if (strcmp(argv[1], "set-weight")==0) 
+		if (strcmp(argv[1], "set-weight")==0)
 		{
 			int queue_id=atoi(argv[2]);
 			if(queue_id<min(queue_num_,WFQ_MAX_QUEUES)&&queue_id>=0)
@@ -210,7 +210,7 @@ int WFQ::command(int argc, const char*const* argv)
 			}
 		}
 	}
-	return (Queue::command(argc, argv));	
+	return (Queue::command(argc, argv));
 }
 
 /* Receive a new packet */
@@ -221,7 +221,7 @@ void WFQ::enque(Packet *p)
 	hdr_flags* hf=hdr_flags::access(p);
 	int pktSize=hdr_cmn::access(p)->size();
 	int qlimBytes=qlim_*mean_pktsize_;
-		
+
 	/* The shared buffer is overfilld */
 	if(TotalByteLength()+pktSize>qlimBytes)
 	{
@@ -229,13 +229,17 @@ void WFQ::enque(Packet *p)
 		//printf("Packet drop\n");
 		return;
 	}
-	
+
 	if(prio>=queue_num_||prio<0)
 		prio=queue_num_-1;
-		
+
 	/* If queue for the flow is empty, calculate headFinishTime and currTime */
 	if(qs[prio].q_->length()==0)
 	{
+		/* The whole switch port is empty before this packet is enqueued */
+		if(weight_sum==0)
+			weight_sum_estimate=0;
+
 		weight_sum+=qs[prio].weight;
 		if(qs[prio].weight>0)
 		{
@@ -249,17 +253,17 @@ void WFQ::enque(Packet *p)
 			exit(1);
 		}
 	}
-	
+
 	/* Update weight_sum_estimate */
 	weight_sum_estimate=weight_sum_estimate*estimate_weight_alpha_+weight_sum*(1-estimate_weight_alpha_);
 	if(debug_)
 		printf("sample weight sum: %f smooth weight sum: %f\n",weight_sum,weight_sum_estimate);
-	
+
 	/* Enqueue ECN marking */
 	qs[prio].q_->enque(p);
 	if(MarkingECN(prio)>0&&hf->ect())
 		hf->ce() = 1;
-		 	
+
 	trace_qlen();
 	trace_total_qlen();
 }
@@ -271,20 +275,20 @@ Packet *WFQ::deque(void)
 	long double minT=LDBL_MAX ;
 	int queue=-1;
 	int tot_len=TotalByteLength();
-		
+
 	/* look for the candidate queue with the earliest virtual finish time */
 	for(i=0; i<queue_num_; i++)
 	{
 		if (qs[i].q_->length()==0)
 			continue;
-		
+
 		if (qs[i].headFinishTime<minT)
 		{
 			queue=i;
 			minT=qs[i].headFinishTime;
 		}
 	}
-	
+
 	if (queue==-1)
 	{
 		//For debug. This should not happen
@@ -292,13 +296,13 @@ Packet *WFQ::deque(void)
 			fprintf (stderr,"not work conserving\n");
 		return NULL;
 	}
-	
+
 	pkt=qs[queue].q_->deque();
 	pktSize=hdr_cmn::access(pkt)->size();
-	 
+
 	/* Set the headFinishTime for the remaining head packet in the queue */
 	nextPkt=qs[queue].q_->head();
-	if (nextPkt!=NULL) 
+	if (nextPkt!=NULL)
 	{
 		if(qs[queue].weight>0)
 		{
@@ -318,26 +322,26 @@ Packet *WFQ::deque(void)
 		weight_sum-=qs[queue].weight;
 		qs[queue].headFinishTime=LDBL_MAX;
 	}
-	
+
 	/* Update weight_sum_estimate */
 	weight_sum_estimate=weight_sum_estimate*estimate_weight_alpha_+weight_sum*(1-estimate_weight_alpha_);
 	if(debug_)
 		printf("sample weight sum: %f smooth weight sum: %f\n",weight_sum,weight_sum_estimate);
-	
+
 	return pkt;
 }
 
 /* routine to write total qlen records */
 void WFQ::trace_total_qlen()
 {
-	if (total_qlen_tchan_) 
+	if (total_qlen_tchan_)
 	{
 		char wrk[500]={0};
 		int n;
 		double t = Scheduler::instance().clock();
 		sprintf(wrk, "%g, %d", t,TotalByteLength());
 		n=strlen(wrk);
-		wrk[n] = '\n'; 
+		wrk[n] = '\n';
 		wrk[n+1] = 0;
 		(void)Tcl_Write(total_qlen_tchan_, wrk, n+1);
 	}
@@ -346,21 +350,21 @@ void WFQ::trace_total_qlen()
 /* routine to write per-queue qlen records */
 void WFQ::trace_qlen()
 {
-	if (qlen_tchan_) 
+	if (qlen_tchan_)
 	{
 		char wrk[500]={0};
 		int n;
 		double t = Scheduler::instance().clock();
 		sprintf(wrk, "%g", t);
 		n=strlen(wrk);
-		wrk[n]=0; 
+		wrk[n]=0;
 		(void)Tcl_Write(qlen_tchan_, wrk, n);
-		
+
 		for(int i=0;i<min(queue_num_,WFQ_MAX_QUEUES); i++)
 		{
 			sprintf(wrk, ", %d",qs[i].q_->byteLength());
 			n=strlen(wrk);
-			wrk[n]=0; 
+			wrk[n]=0;
 			(void)Tcl_Write(qlen_tchan_, wrk, n);
 		}
 		(void)Tcl_Write(qlen_tchan_, "\n", 1);
