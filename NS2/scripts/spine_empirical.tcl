@@ -114,7 +114,6 @@ Queue/DWRR set mean_pktsize_ [expr $pktSize+40]
 Queue/DWRR set port_thresh_ $DCTCP_K
 Queue/DWRR set estimate_round_alpha_ 0.75
 Queue/DWRR set estimate_quantum_alpha_ 0.75
-Queue/DWRR set estimate_round_filter_ false
 Queue/DWRR set link_capacity_ $link_rate$link_capacity_unit
 Queue/DWRR set debug_ false
 
