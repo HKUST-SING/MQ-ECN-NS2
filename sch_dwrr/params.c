@@ -9,7 +9,7 @@ int DWRR_QDISC_BUFFER_MODE=DWRR_QDISC_SHARED_BUFFER;
 /* Per port shared buffer (bytes) */
 int DWRR_QDISC_SHARED_BUFFER_BYTES=DWRR_QDISC_MAX_BUFFER_BYTES;
 /* Bucket size in nanosecond */
-int DWRR_QDISC_BUCKET_NS=20000; 
+int DWRR_QDISC_BUCKET_NS=20000;
 /* Per port ECN marking threshold (MTU) */
 int DWRR_QDISC_PORT_ECN_THRESH=30;
 /* ECN marking scheme */
@@ -32,13 +32,13 @@ int DWRR_QDISC_ROUND_ALPHA_MAX=1000;
 int DWRR_QDISC_DSCP_MIN=0;
 int DWRR_QDISC_DSCP_MAX=63;
 int DWRR_QDISC_QUANTUM_MIN=DWRR_QDISC_MTU_BYTES;
-int DWRR_QDISC_QUANTUM_MAX=200*1024; 
+int DWRR_QDISC_QUANTUM_MAX=200*1024;
 
 /* Per queue ECN marking threshold (MTU) */
 int DWRR_QDISC_QUEUE_ECN_THRESH[DWRR_QDISC_MAX_QUEUES];
 /* DSCP value for different queues*/
 int DWRR_QDISC_QUEUE_DSCP[DWRR_QDISC_MAX_QUEUES];
-/* Quantum for different queues*/ 
+/* Quantum for different queues*/
 int DWRR_QDISC_QUEUE_QUANTUM[DWRR_QDISC_MAX_QUEUES];
 /* Per queue minimum guarantee buffer (bytes) */
 int DWRR_QDISC_QUEUE_BUFFER_BYTES[DWRR_QDISC_MAX_QUEUES];
@@ -67,46 +67,46 @@ int dwrr_qdisc_params_init()
 {
 	int i=0;
 	memset(DWRR_QDISC_Params_table, 0, sizeof(DWRR_QDISC_Params_table));
-		
+
 	for(i=0;i<DWRR_QDISC_MAX_QUEUES;i++)
-	{		
+	{
 		/* Initialize DWRR_QDISC_QUEUE_ECN_THRESH[DWRR_QDISC_MAX_QUEUES]*/
 		snprintf(DWRR_QDISC_Params[8+i].name, 63,"DWRR_QDISC_QUEUE_ECN_THRESH_%d",i);
 		DWRR_QDISC_Params[8+i].ptr=&DWRR_QDISC_QUEUE_ECN_THRESH[i];
 		DWRR_QDISC_QUEUE_ECN_THRESH[i]=DWRR_QDISC_PORT_ECN_THRESH;
-		
+
 		/* Initialize DWRR_QDISC_QUEUE_DSCP[DWRR_QDISC_MAX_QUEUES] */
 		snprintf(DWRR_QDISC_Params[8+i+DWRR_QDISC_MAX_QUEUES].name,63,"DWRR_QDISC_QUEUE_DSCP_%d",i);
 		DWRR_QDISC_Params[8+i+DWRR_QDISC_MAX_QUEUES].ptr=&DWRR_QDISC_QUEUE_DSCP[i];
 		DWRR_QDISC_QUEUE_DSCP[i]=i;
-		
+
 		/* Initialize DWRR_QDISC_QUEUE_QUANTUM[DWRR_QDISC_MAX_QUEUES] */
 		snprintf(DWRR_QDISC_Params[8+i+2*DWRR_QDISC_MAX_QUEUES].name,63,"DWRR_QDISC_QUEUE_QUANTUM_%d",i);
 		DWRR_QDISC_Params[8+i+2*DWRR_QDISC_MAX_QUEUES].ptr=&DWRR_QDISC_QUEUE_QUANTUM[i];
 		DWRR_QDISC_QUEUE_QUANTUM[i]=DWRR_QDISC_MTU_BYTES;
-		
+
 		/* Initialize DWRR_QDISC_QUEUE_BUFFER_BYTES[DWRR_QDISC_MAX_QUEUES] */
 		snprintf(DWRR_QDISC_Params[8+i+3*DWRR_QDISC_MAX_QUEUES].name,63,"DWRR_QDISC_QUEUE_BUFFER_BYTES_%d",i);
 		DWRR_QDISC_Params[8+i+3*DWRR_QDISC_MAX_QUEUES].ptr=&DWRR_QDISC_QUEUE_BUFFER_BYTES[i];
 		DWRR_QDISC_QUEUE_BUFFER_BYTES[i]=DWRR_QDISC_MAX_BUFFER_BYTES;
 	}
-	
+
 	/* End of the parameters */
 	DWRR_QDISC_Params[8+4*DWRR_QDISC_MAX_QUEUES].ptr=NULL;
-	
-	for(i=0; i<8+4*DWRR_QDISC_MAX_QUEUES+1; i++) 
+
+	for(i=0; i<8+4*DWRR_QDISC_MAX_QUEUES+1; i++)
 	{
 		struct ctl_table *entry = &DWRR_QDISC_Params_table[i];
-		
+
 		/* End */
 		if(DWRR_QDISC_Params[i].ptr == NULL)
 			break;
-		
+
 		/* Initialize entry (ctl_table) */
 		entry->procname=DWRR_QDISC_Params[i].name;
 		entry->data=DWRR_QDISC_Params[i].ptr;
 		entry->mode=0644;
-		
+
 		/* DWRR_QDISC_DEBUG_MODE */
 		if(i==0)
 		{
@@ -163,11 +163,11 @@ int dwrr_qdisc_params_init()
 		}
 		entry->maxlen=sizeof(int);
 	}
-	
+
 	DWRR_QDISC_Sysctl=register_sysctl_paths(DWRR_QDISC_Params_path, DWRR_QDISC_Params_table);
 	if(unlikely(DWRR_QDISC_Sysctl==NULL))
 		return -1;
-	else	
+	else
 		return 0;
 
 }
