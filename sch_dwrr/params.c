@@ -2,21 +2,21 @@
 #include <linux/sysctl.h>
 #include <linux/string.h>
 
-/* Debug mode or not */
+/* Debug mode or not. By default, we disable debug mode */
 int DWRR_QDISC_DEBUG_MODE=DWRR_QDISC_DEBUG_OFF;
-/* Buffer management mode: shared (0) or static (1)*/
+/* Buffer management mode: shared (0) or static (1). By default, we enable shread buffer. */
 int DWRR_QDISC_BUFFER_MODE=DWRR_QDISC_SHARED_BUFFER;
 /* Per port shared buffer (bytes) */
 int DWRR_QDISC_SHARED_BUFFER_BYTES=DWRR_QDISC_MAX_BUFFER_BYTES;
-/* Bucket size in nanosecond */
+/* Bucket size in nanosecond. By default, we use 20us for 1G network. */
 int DWRR_QDISC_BUCKET_NS=20000;
-/* Per port ECN marking threshold (MTU) */
-int DWRR_QDISC_PORT_ECN_THRESH=30;
-/* ECN marking scheme */
+/* Per port ECN marking threshold (bytes). By default, we use 30KB for 1G network. */
+int DWRR_QDISC_PORT_THRESH_BYTES=30000;
+/* ECN marking scheme. By default, we use per queue ECN. */
 int DWRR_QDISC_ECN_SCHEME=DWRR_QDISC_QUEUE_ECN;
-/* Alpha for quantum sum estimation */
+/* Alpha for quantum sum estimation. It is 0.75 by default. */
 int DWRR_QDISC_QUANTUM_ALPHA=750;
-/* Alpha for round time estimation */
+/* Alpha for round time estimation. It is 0.75 by default. */
 int DWRR_QDISC_ROUND_ALPHA=750;
 
 int DWRR_QDISC_DEBUG_MODE_MIN=DWRR_QDISC_DEBUG_OFF;
@@ -34,8 +34,8 @@ int DWRR_QDISC_DSCP_MAX=63;
 int DWRR_QDISC_QUANTUM_MIN=DWRR_QDISC_MTU_BYTES;
 int DWRR_QDISC_QUANTUM_MAX=200*1024;
 
-/* Per queue ECN marking threshold (MTU) */
-int DWRR_QDISC_QUEUE_ECN_THRESH[DWRR_QDISC_MAX_QUEUES];
+/* Per queue ECN marking threshold (bytes) */
+int DWRR_QDISC_QUEUE_THRESH_BYTES[DWRR_QDISC_MAX_QUEUES];
 /* DSCP value for different queues*/
 int DWRR_QDISC_QUEUE_DSCP[DWRR_QDISC_MAX_QUEUES];
 /* Quantum for different queues*/
@@ -45,14 +45,14 @@ int DWRR_QDISC_QUEUE_BUFFER_BYTES[DWRR_QDISC_MAX_QUEUES];
 
 /* All parameters that can be configured through sysctl. We have 8+4*DWRR_QDISC_MAX_QUEUES parameters in total. */
 struct DWRR_QDISC_Param DWRR_QDISC_Params[8+4*DWRR_QDISC_MAX_QUEUES+1]={
-	{"DWRR_QDISC_DEBUG_MODE", &DWRR_QDISC_DEBUG_MODE},
-	{"DWRR_QDISC_BUFFER_MODE",&DWRR_QDISC_BUFFER_MODE},
-	{"DWRR_QDISC_SHARED_BUFFER_BYTES", &DWRR_QDISC_SHARED_BUFFER_BYTES},
-	{"DWRR_QDISC_BUCKET_NS", &DWRR_QDISC_BUCKET_NS},
-	{"DWRR_QDISC_PORT_ECN_THRESH", &DWRR_QDISC_PORT_ECN_THRESH},
-	{"DWRR_QDISC_ECN_SCHEME",&DWRR_QDISC_ECN_SCHEME},
-	{"DWRR_QDISC_QUANTUM_ALPHA",&DWRR_QDISC_QUANTUM_ALPHA},
-	{"DWRR_QDISC_ROUND_ALPHA",&DWRR_QDISC_ROUND_ALPHA},
+	{"debug_mode", &DWRR_QDISC_DEBUG_MODE},
+	{"buffer_mode",&DWRR_QDISC_BUFFER_MODE},
+	{"shared_buffer_bytes", &DWRR_QDISC_SHARED_BUFFER_BYTES},
+	{"bucket_ns", &DWRR_QDISC_BUCKET_NS},
+	{"port_thresh_bytes", &DWRR_QDISC_PORT_THRESH_BYTES},
+	{"ecn_scheme",&DWRR_QDISC_ECN_SCHEME},
+	{"quantum_alpha",&DWRR_QDISC_QUANTUM_ALPHA},
+	{"round_alpha",&DWRR_QDISC_ROUND_ALPHA},
 };
 
 struct ctl_table DWRR_QDISC_Params_table[8+4*DWRR_QDISC_MAX_QUEUES+1];
@@ -70,23 +70,23 @@ int dwrr_qdisc_params_init()
 
 	for(i=0;i<DWRR_QDISC_MAX_QUEUES;i++)
 	{
-		/* Initialize DWRR_QDISC_QUEUE_ECN_THRESH[DWRR_QDISC_MAX_QUEUES]*/
-		snprintf(DWRR_QDISC_Params[8+i].name, 63,"DWRR_QDISC_QUEUE_ECN_THRESH_%d",i);
-		DWRR_QDISC_Params[8+i].ptr=&DWRR_QDISC_QUEUE_ECN_THRESH[i];
-		DWRR_QDISC_QUEUE_ECN_THRESH[i]=DWRR_QDISC_PORT_ECN_THRESH;
+		/* Initialize DWRR_QDISC_QUEUE_THRESH_BYTES[DWRR_QDISC_MAX_QUEUES]*/
+		snprintf(DWRR_QDISC_Params[8+i].name, 63,"queue_thresh_bytes_%d",i);
+		DWRR_QDISC_Params[8+i].ptr=&DWRR_QDISC_QUEUE_THRESH_BYTES[i];
+		DWRR_QDISC_QUEUE_THRESH_BYTES[i]=DWRR_QDISC_PORT_THRESH_BYTES;
 
 		/* Initialize DWRR_QDISC_QUEUE_DSCP[DWRR_QDISC_MAX_QUEUES] */
-		snprintf(DWRR_QDISC_Params[8+i+DWRR_QDISC_MAX_QUEUES].name,63,"DWRR_QDISC_QUEUE_DSCP_%d",i);
+		snprintf(DWRR_QDISC_Params[8+i+DWRR_QDISC_MAX_QUEUES].name,63,"queue_dscp_%d",i);
 		DWRR_QDISC_Params[8+i+DWRR_QDISC_MAX_QUEUES].ptr=&DWRR_QDISC_QUEUE_DSCP[i];
 		DWRR_QDISC_QUEUE_DSCP[i]=i;
 
 		/* Initialize DWRR_QDISC_QUEUE_QUANTUM[DWRR_QDISC_MAX_QUEUES] */
-		snprintf(DWRR_QDISC_Params[8+i+2*DWRR_QDISC_MAX_QUEUES].name,63,"DWRR_QDISC_QUEUE_QUANTUM_%d",i);
+		snprintf(DWRR_QDISC_Params[8+i+2*DWRR_QDISC_MAX_QUEUES].name,63,"queue_quantum_%d",i);
 		DWRR_QDISC_Params[8+i+2*DWRR_QDISC_MAX_QUEUES].ptr=&DWRR_QDISC_QUEUE_QUANTUM[i];
 		DWRR_QDISC_QUEUE_QUANTUM[i]=DWRR_QDISC_MTU_BYTES;
 
 		/* Initialize DWRR_QDISC_QUEUE_BUFFER_BYTES[DWRR_QDISC_MAX_QUEUES] */
-		snprintf(DWRR_QDISC_Params[8+i+3*DWRR_QDISC_MAX_QUEUES].name,63,"DWRR_QDISC_QUEUE_BUFFER_BYTES_%d",i);
+		snprintf(DWRR_QDISC_Params[8+i+3*DWRR_QDISC_MAX_QUEUES].name,63,"queue_buffer_bytes_%d",i);
 		DWRR_QDISC_Params[8+i+3*DWRR_QDISC_MAX_QUEUES].ptr=&DWRR_QDISC_QUEUE_BUFFER_BYTES[i];
 		DWRR_QDISC_QUEUE_BUFFER_BYTES[i]=DWRR_QDISC_MAX_BUFFER_BYTES;
 	}
