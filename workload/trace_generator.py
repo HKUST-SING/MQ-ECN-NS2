@@ -15,17 +15,6 @@ def usage():
 def nextTime(rateParameter):
 	#We use round function to get a integer
     return round(-math.log(1.0 - random.random()) / rateParameter)
-
-def serviceID(services_load, service_num):
-	if len(services_load)!=service_num:
-		print 'Error!'
-	else:
-		x=random.random()
-		for i in range(len(services_load)):
-			if x<=services_load[i]:
-				return i
-			else:
-				i=i+1
 		
 #Given a flow distribution and a random number in (0,1), return a flow size (KB)
 def flowsize(distribution, random):
@@ -89,18 +78,7 @@ else:
 	for i in range(flow_num):
 		#Get time interval (sleep time) 
 		times.append(nextTime(rate)) 
-	
-	#Generate service load 
-	services_load=[]
-	for i in range(service_num):
-		services_load.append(random.random())
-				
-	for i in range(1,service_num):
-		services_load[i]=services_load[i-1]+services_load[i]
-	
-	for i in range(service_num):
-		services_load[i]=services_load[i]/services_load[service_num-1]
-	
+		
 	#Per service flow number 
 	services_flow=[]
 	for i in range(service_num):
@@ -110,16 +88,12 @@ else:
 	#Trace format: time_interval flow_size host_id service_id 
 	output_file=open(output_filename,'w')
 	for i in range(flow_num):
-		service_id=serviceID(services_load,service_num)
-		services_flow[service_id]+=1
-		output_file.write(str(times[i])+' '+str(flows[i])+' '+str(random.randint(0,host_num-1))+' '+str(service_id)+'\n')
+		output_file.write(str(times[i])+' '+str(flows[i])+' '+str(random.randint(0,host_num-1))+' '+str(random.randint(0,service_num-1))+'\n')
 	output_file.close()
 	
 	print 'Auto generate '+str(len(flows))+' flows:'
 	print 'The average flow size: '+str(avg)+' KB'
 	print 'The average request speed: '+str(num)+' requests/second'
 	print 'Dynamic flow emulation will last for about '+str(len(flows)/num)+' seconds'
-	print services_load
-	print services_flow
 	print 'Done'
 	
