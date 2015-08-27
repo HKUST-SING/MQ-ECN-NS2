@@ -236,10 +236,6 @@ void WFQ::enque(Packet *p)
 	/* If queue for the flow is empty, calculate headFinishTime and currTime */
 	if(qs[prio].q_->length()==0)
 	{
-		/* The whole switch port is empty before this packet is enqueued */
-		if(weight_sum==0)
-			weight_sum_estimate=0;
-
 		weight_sum+=qs[prio].weight;
 		if(qs[prio].weight>0)
 		{
@@ -255,9 +251,9 @@ void WFQ::enque(Packet *p)
 	}
 
 	/* Update weight_sum_estimate */
-	weight_sum_estimate=weight_sum_estimate*estimate_weight_alpha_+weight_sum*(1-estimate_weight_alpha_);
+	/*weight_sum_estimate=weight_sum_estimate*estimate_weight_alpha_+weight_sum*(1-estimate_weight_alpha_);
 	if(debug_)
-		printf("sample weight sum: %f smooth weight sum: %f\n",weight_sum,weight_sum_estimate);
+		printf("sample weight sum: %f smooth weight sum: %f\n",weight_sum,weight_sum_estimate);*/
 
 	/* Enqueue ECN marking */
 	qs[prio].q_->enque(p);
@@ -323,8 +319,13 @@ Packet *WFQ::deque(void)
 		qs[queue].headFinishTime=LDBL_MAX;
 	}
 
-	/* Update weight_sum_estimate */
-	weight_sum_estimate=weight_sum_estimate*estimate_weight_alpha_+weight_sum*(1-estimate_weight_alpha_);
+	/* If the switch port becomes empty after dequeue, reset weight_sum_estimate back to 0 */
+	if(int(weight_sum)==0)
+		weight_sum_estimate=0;
+	/* Otherwise, update weight_sum_estimate correspondingly */
+	else
+		weight_sum_estimate=weight_sum_estimate*estimate_weight_alpha_+weight_sum*(1-estimate_weight_alpha_);
+
 	if(debug_)
 		printf("sample weight sum: %f smooth weight sum: %f\n",weight_sum,weight_sum_estimate);
 
