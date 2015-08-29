@@ -66,13 +66,14 @@ static class DWRRClass : public TclClass
 		}
 } class_dwrr;
 
-DWRR::DWRR()
+DWRR::DWRR(): timer_(this)
 {
 	queues=new PacketDWRR[MAX_QUEUE_NUM];
 	activeList=new PacketDWRR();
 	round_time=0;
 	quantum_sum=0;
 	quantum_sum_estimate=0;
+	init=0;
 
 	total_qlen_tchan_=NULL;
 	qlen_tchan_=NULL;
@@ -84,6 +85,7 @@ DWRR::DWRR()
 	bind("marking_scheme_",&marking_scheme_);
 	bind("estimate_round_alpha_",&estimate_round_alpha_);
 	bind("estimate_quantum_alpha_",&estimate_quantum_alpha_);
+	bind("estimate_quantum_interval_",&estimate_quantum_interval_);
 	bind_bw("link_capacity_",&link_capacity_);
 	bind_bool("debug_",&debug_);
 }
@@ -92,6 +94,24 @@ DWRR::~DWRR()
 {
 	delete activeList;
 	delete [] queues;
+	timer_.cancel();
+}
+
+void DWRR::timeout(int)
+{
+	/* update quantum_sum_estimate */
+	quantum_sum_estimate=quantum_sum_estimate*estimate_quantum_alpha_+quantum_sum*(1-estimate_quantum_alpha_);
+
+	if(debug_&&marking_scheme_==MQ_MARKING_GENER)
+		printf("%.9f smooth quantum sum: %f\n",Scheduler::instance().clock(),quantum_sum_estimate);
+
+	/* reschedule timer */
+	timer_.resched(estimate_quantum_interval_);
+}
+
+void DWRR_Timer::expire(Event* e)
+{
+	queue_->timeout(0);
 }
 
 /* Get total length of all queues in bytes */
@@ -155,37 +175,32 @@ int DWRR::MarkingECN(int q)
 	/* MQ-ECN for any packet scheduling algorithms */
 	else if(marking_scheme_==MQ_MARKING_GENER)
 	{
-		if(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&quantum_sum_estimate>0)
-		{
-			double thresh=min(queues[q].quantum/quantum_sum_estimate,1)*port_thresh_;
-			if(queues[q].byteLength()>thresh*mean_pktsize_)
-				return 1;
-			else
-				return 0;
-		}
+		double thresh=0;
+		if(quantum_sum_estimate>0)
+			thresh=min(queues[q].quantum/quantum_sum_estimate,1)*port_thresh_;
 		else
-		{
+			thresh=port_thresh_;
+
+		if(queues[q].byteLength()>thresh*mean_pktsize_)
+			return 1;
+		else
 			return 0;
-		}
+
 	}
 	/* MQ-ECN for round robin packet scheduling algorithms */
 	else if(marking_scheme_==MQ_MARKING_RR)
 	{
-		if(queues[q].byteLength()>=queues[q].thresh*mean_pktsize_&&round_time>0.000000001&&link_capacity_>0)
-		{
-			double weightedFairRate=queues[q].quantum*8/round_time;
-			double thresh=min(weightedFairRate/link_capacity_,1)*port_thresh_;
+		double thresh=0;
+		if(round_time>=0.000000001&&link_capacity_>0)
+			thresh=min(queues[q].quantum*8/round_time/link_capacity_,1)*port_thresh_;
+		else
+			thresh=port_thresh_;
 			//For debug
 			//printf("round time: %f threshold: %f\n",round_time, thresh);
-			if(queues[q].byteLength()>thresh*mean_pktsize_)
-				return 1;
-			else
-				return 0;
-		}
+		if(queues[q].byteLength()>thresh*mean_pktsize_)
+			return 1;
 		else
-		{
 			return 0;
-		}
 	}
 	/* Unknown ECN marking scheme */
 	else
@@ -236,7 +251,7 @@ int DWRR::command(int argc, const char*const* argv)
 			return (TCL_OK);
 		}
 	}
-	else if (argc == 4)
+	else if (argc==4)
 	{
 		if (strcmp(argv[1], "set-quantum")==0)
 		{
@@ -293,6 +308,13 @@ int DWRR::command(int argc, const char*const* argv)
 /* Receive a new packet */
 void DWRR::enque(Packet *p)
 {
+	if(init==0)
+	{
+		/* Start timer*/
+		timer_.resched(estimate_quantum_interval_);
+		init=1;
+	}
+
 	hdr_ip *iph=hdr_ip::access(p);
 	int prio=iph->prio();
 	hdr_flags* hf=hdr_flags::access(p);
@@ -387,16 +409,6 @@ Packet *DWRR::deque(void)
 						if(debug_&&marking_scheme_==MQ_MARKING_RR)
 							printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
 					}
-
-					/* If the switch port is empty, reset quantum_sum_estimate back to 0 */
-					if(quantum_sum==0)
-						quantum_sum_estimate=0;
-					else
-						quantum_sum_estimate=quantum_sum_estimate*estimate_quantum_alpha_+quantum_sum*(1-estimate_quantum_alpha_);
-
-					if(debug_&&marking_scheme_==MQ_MARKING_GENER)
-						printf("sample quantum sum: %d smooth quantum sum: %f\n",quantum_sum,quantum_sum_estimate);
-
 					break;
 				}
 				/* if we don't have enough quantum to dequeue the head packet and the queue is not empty */

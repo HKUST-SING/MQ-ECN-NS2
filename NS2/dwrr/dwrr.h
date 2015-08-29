@@ -4,6 +4,7 @@
 #include "queue.h"
 #include "config.h"
 #include "trace.h"
+#include "timer-handler.h"
 
 /*Maximum queue number */
 #define MAX_QUEUE_NUM 32
@@ -19,6 +20,16 @@
 
 class PacketDWRR;
 class DWRR;
+
+class DWRR_Timer : public TimerHandler
+{
+public:
+	DWRR_Timer(DWRR *q) : TimerHandler() { queue_=q;}
+
+protected:
+	virtual void expire(Event *e);
+	DWRR *queue_;
+};
 
 class PacketDWRR: public PacketQueue
 {
@@ -41,6 +52,7 @@ class DWRR : public Queue
 	public:
 		DWRR();
 		~DWRR();
+		void timeout(int);
 		virtual int command(int argc, const char*const* argv);
 
 	protected:
@@ -54,9 +66,11 @@ class DWRR : public Queue
 		/* Variables */
 		PacketDWRR *queues;	//underlying multi-FIFO (CoS) queues
 		PacketDWRR *activeList;	//list for active queues
+		DWRR_Timer timer_;	//Underlying timer for quantum_sum_estimate update
 		double round_time;	//estimation value for round time
 		double quantum_sum_estimate;	//estimation value for sum of quantums of all non-empty  queues
 		int quantum_sum;	//sum of quantums of all non-empty queues in activeList
+		int init;	//whether the timer has been started
 
 		int queue_num_;	//number of queues
 		int mean_pktsize_;	//MTU in bytes
@@ -64,6 +78,7 @@ class DWRR : public Queue
 		int marking_scheme_;	//ECN marking policy
 		double estimate_round_alpha_;	//factor between 0 and 1 for round time estimation
 		double estimate_quantum_alpha_;	//factor between 0 and 1 for quantum estimation
+		double estimate_quantum_interval_;	//time interval (second) to update quantum_sum_estimate for MQ-ECN
 		double link_capacity_;	//Link capacity
 		int debug_;	//debug more(true) or not(false)
 
