@@ -70,6 +70,8 @@ class DWRR : public Queue
 		double round_time;	//estimation value for round time
 		double quantum_sum_estimate;	//estimation value for sum of quantums of all non-empty  queues
 		int quantum_sum;	//sum of quantums of all non-empty queues in activeList
+		double last_update_time;	//last time when we update quantum_sum_estimate
+		double last_idle_time;	//Last time when link becomes idle
 		int init;	//whether the timer has been started
 
 		int queue_num_;	//number of queues
@@ -78,7 +80,8 @@ class DWRR : public Queue
 		int marking_scheme_;	//ECN marking policy
 		double estimate_round_alpha_;	//factor between 0 and 1 for round time estimation
 		double estimate_quantum_alpha_;	//factor between 0 and 1 for quantum estimation
-		double estimate_quantum_interval_;	//time interval (second) to update quantum_sum_estimate for MQ-ECN
+		double estimate_quantum_interval_bytes_;	//Time interval is estimate_quantum_interval_bytes_/link capacity.
+		int estimate_quantum_enable_timer_;	//Whether we use real timer (TimerHandler) for quantum estimation
 		double link_capacity_;	//Link capacity
 		int debug_;	//debug more(true) or not(false)
 

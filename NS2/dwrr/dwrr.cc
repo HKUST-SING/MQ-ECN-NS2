@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <float.h>
+#include <math.h>
 #include "flags.h"
 #include "dwrr.h"
 
@@ -74,6 +75,8 @@ DWRR::DWRR(): timer_(this)
 	quantum_sum=0;
 	quantum_sum_estimate=0;
 	init=0;
+	last_update_time=0;
+	last_idle_time=0;
 
 	total_qlen_tchan_=NULL;
 	qlen_tchan_=NULL;
@@ -85,7 +88,8 @@ DWRR::DWRR(): timer_(this)
 	bind("marking_scheme_",&marking_scheme_);
 	bind("estimate_round_alpha_",&estimate_round_alpha_);
 	bind("estimate_quantum_alpha_",&estimate_quantum_alpha_);
-	bind("estimate_quantum_interval_",&estimate_quantum_interval_);
+	bind("estimate_quantum_interval_bytes_",&estimate_quantum_interval_bytes_);
+	bind_bool("estimate_quantum_enable_timer_",&estimate_quantum_enable_timer_);
 	bind_bw("link_capacity_",&link_capacity_);
 	bind_bool("debug_",&debug_);
 }
@@ -103,10 +107,11 @@ void DWRR::timeout(int)
 	quantum_sum_estimate=quantum_sum_estimate*estimate_quantum_alpha_+quantum_sum*(1-estimate_quantum_alpha_);
 
 	if(debug_&&marking_scheme_==MQ_MARKING_GENER)
-		printf("%.9f smooth quantum sum: %f\n",Scheduler::instance().clock(),quantum_sum_estimate);
+		printf("%.9f smooth quantum sum: %f, sample quantum sum: %d\n",Scheduler::instance().clock(),quantum_sum_estimate, quantum_sum);
 
 	/* reschedule timer */
-	timer_.resched(estimate_quantum_interval_);
+	if(link_capacity_>0)
+		timer_.resched(estimate_quantum_interval_bytes_*8/link_capacity_);
 }
 
 void DWRR_Timer::expire(Event* e)
@@ -176,7 +181,7 @@ int DWRR::MarkingECN(int q)
 	else if(marking_scheme_==MQ_MARKING_GENER)
 	{
 		double thresh=0;
-		if(quantum_sum_estimate>0)
+		if(quantum_sum_estimate>=0.000000001)
 			thresh=min(queues[q].quantum/quantum_sum_estimate,1)*port_thresh_;
 		else
 			thresh=port_thresh_;
@@ -308,19 +313,34 @@ int DWRR::command(int argc, const char*const* argv)
 /* Receive a new packet */
 void DWRR::enque(Packet *p)
 {
-	if(init==0)
-	{
-		/* Start timer*/
-		timer_.resched(estimate_quantum_interval_);
-		init=1;
-	}
-
 	hdr_ip *iph=hdr_ip::access(p);
 	int prio=iph->prio();
 	hdr_flags* hf=hdr_flags::access(p);
 	int pktSize=hdr_cmn::access(p)->size();
 	int qlimBytes=qlim_*mean_pktsize_;
 	queue_num_=min(queue_num_,MAX_QUEUE_NUM);
+
+	if(init==0)
+	{
+		/* Start timer*/
+		if(marking_scheme_==MQ_MARKING_GENER && estimate_quantum_enable_timer_ && estimate_quantum_interval_bytes_>0 && link_capacity_>0)
+			timer_.resched(estimate_quantum_interval_bytes_*8/link_capacity_);
+		init=1;
+	}
+
+	if(TotalByteLength()==0 && marking_scheme_==MQ_MARKING_GENER && !estimate_quantum_enable_timer_)
+	{
+		double now=Scheduler::instance().clock();
+		double idleTime=now-last_idle_time;
+		if(estimate_quantum_interval_bytes_>0 && link_capacity_>0)
+			quantum_sum_estimate=quantum_sum_estimate*pow(estimate_quantum_alpha_,idleTime/(estimate_quantum_interval_bytes_*8/link_capacity_));
+		else
+			quantum_sum_estimate=0;
+		last_update_time=now;
+
+		if(debug_)
+			printf("%.9f smooth quantum sum is reset to %f\n",now,quantum_sum_estimate);
+	}
 
 	/* The shared buffer is overfilld */
 	if(TotalByteLength()+pktSize>qlimBytes)
@@ -344,6 +364,9 @@ void DWRR::enque(Packet *p)
 		InsertTailList(activeList, &queues[prio]);
 		quantum_sum+=queues[prio].quantum;
 	}
+
+	//if(debug_)
+	//	printf("enqueue quantum sum: %d\n", quantum_sum);
 
 	/* Enqueue ECN marking */
 	if(MarkingECN(prio)>0&&hf->ect())
@@ -428,6 +451,21 @@ Packet *DWRR::deque(void)
 		}
 	}
 
+	if(marking_scheme_==MQ_MARKING_GENER && !estimate_quantum_enable_timer_)
+	{
+		double now=Scheduler::instance().clock();
+		double timeInterval=now-last_update_time;
+		if(estimate_quantum_interval_bytes_>0 && link_capacity_>0 && timeInterval>=0.995*estimate_quantum_interval_bytes_*8/link_capacity_)
+		{
+			quantum_sum_estimate=quantum_sum_estimate*estimate_quantum_alpha_+quantum_sum*(1-estimate_quantum_alpha_);
+			last_update_time=now;
+			if(debug_)
+				printf("%.9f smooth quantum sum: %f, sample quantum sum: %d\n",now, quantum_sum_estimate, quantum_sum);
+		}
+
+		if(TotalByteLength()==0)
+			last_idle_time=now;
+	}
 	return pkt;
 }
 
