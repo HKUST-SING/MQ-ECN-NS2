@@ -12,24 +12,22 @@ class SimThread(threading.Thread):
 		os.system('mkdir '+self.directory_name)
 		os.system(self.cmd)
 
-service_num_arr=[8,32]		
-sim_end=100000
+service_num_arr=[8,32]
+sim_end=50000
 link_rate=10
 mean_link_delay=0.0000002
 host_delay=0.000020
 queueSize=240
-load_arr=[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]
+load_arr=[0.1,0.8,0.9]
 connections_per_pair=1
-meanFlowSize=1661480
-paretoShape=1.05
 enableMultiPath=1
 perflowMP=1
-sourceAlg='DCTCP-Sack' 
+sourceAlg='DCTCP-Sack'
 ackRatio=1
 slowstartrestart='true'
 DCTCP_g=0.0625
 min_rto=0.005
-ECN_scheme_arr=[2]
+ECN_scheme_arr=[0,2,4]
 DCTCP_K=65.0
 switchAlg='DWRR'
 topology_spt=16
@@ -38,8 +36,7 @@ topology_spines=4
 topology_x=1
 
 ns_path='/home/wei/buffer_management/ns-allinone-2.35/ns-2.35/ns'
-sim_script='spine_empirical.tcl'
-flow_cdf='CDF_dctcp.tcl'
+sim_script='spine_empirical_diffserv.tcl'
 
 threads=[]
 max_thread_num=18
@@ -54,9 +51,9 @@ for service_num in service_num_arr:
 			transport='tcp'
 			if 'DCTCP' in sourceAlg:
 				transport='dctcp'
-			
-			#Directory name: workload_transport_scheme_[ECN_scheme]_load_[load]_service_[service_num]	
-			directory_name='websearch_'+switchAlg+'_'+transport+'_scheme_'+str(ECN_scheme)+'_load_'+str(int(load*10))+'_service_'+str(service_num)
+
+			#Directory name: workload_transport_scheme_[ECN_scheme]_load_[load]_service_[service_num]
+			directory_name='diffserv_'+switchAlg+'_'+transport+'_scheme_'+str(ECN_scheme)+'_load_'+str(int(load*10))+'_service_'+str(service_num)
 			directory_name=directory_name.lower()
 			#Simulation command
 			cmd=ns_path+' '+sim_script+' '\
@@ -68,8 +65,6 @@ for service_num in service_num_arr:
 				+str(queueSize)+' '\
 				+str(load)+' '\
 				+str(connections_per_pair)+' '\
-				+str(meanFlowSize)+' '\
-				+str(paretoShape)+' '\
 				+str(enableMultiPath)+' '\
 				+str(perflowMP)+' '\
 				+str(sourceAlg)+' '\
@@ -84,10 +79,9 @@ for service_num in service_num_arr:
 				+str(topology_tors)+' '\
 				+str(topology_spines)+' '\
 				+str(topology_x)+' '\
-				+str(flow_cdf)+' '\
 				+str('./'+directory_name+'/flow.tr')+'  >'\
 				+str('./'+directory_name+'/logFile.tr')
-		
+
 			#Start thread to run simulation
 			newthread=SimThread(cmd,directory_name)
 			threads.append(newthread)
@@ -98,9 +92,9 @@ thread_i=0
 tmp_threads=[]
 #The number of concurrent running threads
 concurrent_thread_num=0
-	
+
 while True:
-	#If it is a legal thread and 'tmp_threads' still has capacity 
+	#If it is a legal thread and 'tmp_threads' still has capacity
 	if thread_i<len(threads) and len(tmp_threads)<max_thread_num:
 		tmp_threads.append(threads[thread_i])
 		concurrent_thread_num=concurrent_thread_num+1

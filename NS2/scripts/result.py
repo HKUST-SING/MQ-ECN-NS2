@@ -8,17 +8,26 @@ def avg(flows):
 	sum=0.0
 	for f in flows:
 		sum=sum+f
-	return sum/len(flows)
+	if len(flows)>0:
+		return sum/len(flows)
+	else:
+		return 0
 
 #GET mean FCT
 def mean(flows):
 	flows.sort()
-	return flows[50*len(flows)/100]
+	if len(flows)>0:
+		return flows[50*len(flows)/100]
+	else:
+		return 0
 	
 #GET 99% FCT
 def max(flows):
 	flows.sort()
-	return flows[99*len(flows)/100]
+	if len(flows)>0:
+		return flows[99*len(flows)/100]
+	else:
+		return 0
 	
 	
 parser = argparse.ArgumentParser()

@@ -4,7 +4,7 @@ set ns [new Simulator]
 set sim_start [clock seconds]
 puts "Host: [exec uname -a]"
 
-if {$argc != 26} {
+if {$argc != 23} {
     puts "wrong number of arguments $argc"
     exit 0
 }
@@ -17,33 +17,30 @@ set host_delay [lindex $argv 4]
 set queueSize [lindex $argv 5]
 set load [lindex $argv 6]
 set connections_per_pair [lindex $argv 7]
-set meanFlowSize [lindex $argv 8]
-set paretoShape [lindex $argv 9]
 #### Multipath
-set enableMultiPath [lindex $argv 10]
-set perflowMP [lindex $argv 11]
+set enableMultiPath [lindex $argv 8]
+set perflowMP [lindex $argv 9]
 #### Transport settings options
-set sourceAlg [lindex $argv 12] ; # Sack or DCTCP-Sack
-set ackRatio [lindex $argv 13]
-set slowstartrestart [lindex $argv 14]
-set DCTCP_g [lindex $argv 15] ;	# DCTCP alpha estimation gain
-set min_rto [lindex $argv 16]
+set sourceAlg [lindex $argv 10] ; # Sack or DCTCP-Sack
+set ackRatio [lindex $argv 11]
+set slowstartrestart [lindex $argv 12]
+set DCTCP_g [lindex $argv 13] ;	# DCTCP alpha estimation gain
+set min_rto [lindex $argv 14]
 #### Switch side options
-#per-queue standard (0), per-port (1), our dynamic per-queue algorithm (2),
-#our dynamic hybrid algorithm (3) and per-queue min (4)
-set ECN_scheme [lindex $argv 17]
-set DCTCP_K [lindex $argv 18]
-set switchAlg [lindex $argv 19]
+#per-queue standard (0), per-port (1), MQ-ECN (2), MQ-ECN-RR (3) and per-queue min (4)
+set ECN_scheme [lindex $argv 15]
+set DCTCP_K [lindex $argv 16]
+set switchAlg [lindex $argv 17]
 #### topology
-set topology_spt [lindex $argv 20]
-set topology_tors [lindex $argv 21]
-set topology_spines [lindex $argv 22]
-set topology_x [lindex $argv 23]
-#### Flow size distribution CDF file
-set flow_cdf [lindex $argv 24]
+set topology_spt [lindex $argv 18]
+set topology_tors [lindex $argv 19]
+set topology_spines [lindex $argv 20]
+set topology_x [lindex $argv 21]
 #### FCT log file
-set fct_log [lindex $argv 25]
+set fct_log [lindex $argv 22]
 
+#### Flow size distribution CDF file
+###set flow_cdf [lindex $argv 24]
 set pktSize 1460;	#packet size in bytes
 set quantum [expr $pktSize+40];	#quantum for each queue (DWRR)
 set wrr_weight 1; #weight for each queue (WRR)
@@ -74,7 +71,6 @@ puts "pktSize(payload) $pktSize Bytes"
 puts "pktSize(include header) [expr $pktSize + 40] Bytes"
 puts "service number $service_num"
 puts "FCT log file $fct_log"
-puts "Flow size distribution CDF file $flow_cdf"
 puts " "
 
 ################# Transport Options ####################
@@ -279,10 +275,10 @@ for {set i 0} {$i < $topology_tors} {incr i} {
 
 
 #############  Agents          #########################
-set lambda [expr ($link_rate*$load*1000000000)/($meanFlowSize*8.0/1460*1500)]
+#set lambda [expr ($link_rate*$load*1000000000)/($meanFlowSize*8.0)]
 #set lambda [expr ($link_rate*$load*1000000000)/($mean_npkts*($pktSize+40)*8.0)]
-puts "Arrival: Poisson with inter-arrival [expr 1/$lambda * 1000] ms"
-puts "FlowSize: Pareto with mean = $meanFlowSize, shape = $paretoShape"
+#puts "Arrival: Poisson with inter-arrival [expr 1/$lambda * 1000] ms"
+#puts "FlowSize: Pareto with mean = $meanFlowSize, shape = $paretoShape"
 
 puts "Setting up connections ..."; flush stdout
 
@@ -298,12 +294,33 @@ for {set j 0} {$j < $S } {incr j} {
 			set agtagr($i,$j) [new Agent_Aggr_pair]
 
 			#Choose service randomly
-			set service_id [expr {int(rand()*$service_num)}]
+			set service_id [expr {($j*$S+$i) % $service_num}]
 			$agtagr($i,$j) setup $s($i) $s($j) "$i $j" $connections_per_pair $init_fid  $service_id "TCP_pair"
 			$agtagr($i,$j) attach-logfile $flowlog
 
-			puts -nonewline "($i,$j) service $service_id"
-			#For Poisson/Pareto
+            set flow_cdf "CDF_vl2.tcl"
+            set meanFlowSize 7495019
+            set dist "vl2"
+
+            #Currently, we have 4 flow size distributions in total
+            if {$service_id % 4==0} {
+                set flow_cdf "CDF_cache.tcl"
+                set meanFlowSize 913703
+                set dist "cache"
+            } elseif {$service_id % 4==1} {
+                set flow_cdf "CDF_dctcp.tcl"
+                set meanFlowSize 1671357
+                set dist "dctcp"
+            } elseif {$service_id % 4==2} {
+                set flow_cdf "CDF_hadoop.tcl"
+                set meanFlowSize 1389780
+                set dist "hadoop"
+            }
+
+            set lambda [expr ($link_rate*$load*1000000000)/($meanFlowSize*8.0)]
+            puts -nonewline "($i,$j) service $service_id $dist "
+
+			#For Poisson
 			$agtagr($i,$j) set_PCarrival_process  [expr $lambda/($S - 1)] $flow_cdf [expr 17*$i+1244*$j] [expr 33*$i+4369*$j]
 			#$ns at 0.1 "$agtagr($i,$j) warmup 0.5 5"
 			$ns at 1 "$agtagr($i,$j) init_schedule"
