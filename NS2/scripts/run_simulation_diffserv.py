@@ -1,4 +1,4 @@
-import threading
+vximport threading
 import os
 
 class SimThread(threading.Thread):

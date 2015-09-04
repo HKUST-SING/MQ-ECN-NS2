@@ -18,7 +18,7 @@ static class WFQClass : public TclClass
 		}
 } class_wfq;
 
-WFQ::WFQ()
+WFQ::WFQ(): timer_(this)
 {
 	queue_num_=32;
 	mean_pktsize_=1500;
@@ -26,6 +26,13 @@ WFQ::WFQ()
 	marking_scheme_=0;
 	weight_sum=0;
 	weight_sum_estimate=0;
+	init=0;
+	last_update_time=0;
+	last_idle_time=0;
+
+	currTime=0.0;
+	total_qlen_tchan_=NULL;
+	qlen_tchan_=NULL;
 
 	/* bind variables */
 	bind("queue_num_", &queue_num_);
@@ -33,11 +40,10 @@ WFQ::WFQ()
 	bind("port_thresh_",&port_thresh_);
 	bind("marking_scheme_",&marking_scheme_);
 	bind("estimate_weight_alpha_",&estimate_weight_alpha_);
+	bind("estimate_weight_interval_bytes_",&estimate_weight_interval_bytes_);
+	bind_bool("estimate_weight_enable_timer_",&estimate_weight_enable_timer_);
+	bind_bw("link_capacity_",&link_capacity_);
 	bind_bool("debug_",&debug_);
-
-	currTime=0.0;
-	total_qlen_tchan_=NULL;
-	qlen_tchan_=NULL;
 
 	/* Initialize queue states */
 	qs=new QueueState[WFQ_MAX_QUEUES];
@@ -56,6 +62,25 @@ WFQ::~WFQ()
 		delete[] qs[i].q_;
 	}
 	delete[] qs;
+	timer_.cancel();
+}
+
+void WFQ::timeout(int)
+{
+	/* update weight_sum_estimate */
+	weight_sum_estimate=weight_sum_estimate*estimate_weight_alpha_+weight_sum*(1-estimate_weight_alpha_);
+
+	if(debug_&&marking_scheme_==MQ_MARKING_GENER)
+		printf("%.9f smooth weight sum: %f, sample weight sum: %f\n",Scheduler::instance().clock(),weight_sum_estimate, weight_sum);
+
+	/* reschedule timer */
+	if(link_capacity_>0)
+		timer_.resched(estimate_weight_interval_bytes_*8/link_capacity_);
+}
+
+void WFQ_Timer::expire(Event* e)
+{
+	queue_->timeout(0);
 }
 
 /* Get total length of all queues in bytes */
@@ -97,18 +122,17 @@ int WFQ::MarkingECN(int q)
 	/* MQ-ECN for any packet scheduling algorithms */
 	else if(marking_scheme_==MQ_MARKING_GENER)
 	{
-		if(qs[q].q_->byteLength()>=qs[q].thresh*mean_pktsize_&&weight_sum_estimate>0)
-		{
-			double thresh=min(qs[q].weight/weight_sum_estimate,1)*port_thresh_;
-			if(qs[q].q_->byteLength()>thresh*mean_pktsize_)
-				return 1;
-			else
-				return 0;
-		}
+		double thresh=0;
+		if(weight_sum_estimate>=0.000000001)
+			thresh=min(qs[q].weight/weight_sum_estimate,1)*port_thresh_;
 		else
-		{
+			thresh=port_thresh_;
+
+		if(qs[q].q_->byteLength()>thresh*mean_pktsize_)
+			return 1;
+		else
 			return 0;
-		}
+
 	}
 	/* Unknown ECN marking scheme */
 	else
@@ -221,6 +245,29 @@ void WFQ::enque(Packet *p)
 	hdr_flags* hf=hdr_flags::access(p);
 	int pktSize=hdr_cmn::access(p)->size();
 	int qlimBytes=qlim_*mean_pktsize_;
+	queue_num_=min(queue_num_,WFQ_MAX_QUEUES);
+
+	if(init==0)
+	{
+		/* Start timer*/
+		if(marking_scheme_==MQ_MARKING_GENER && estimate_weight_enable_timer_ && estimate_weight_interval_bytes_>0 && link_capacity_>0)
+			timer_.resched(estimate_weight_interval_bytes_*8/link_capacity_);
+		init=1;
+	}
+
+	if(TotalByteLength()==0 && marking_scheme_==MQ_MARKING_GENER && !estimate_weight_enable_timer_)
+	{
+		double now=Scheduler::instance().clock();
+		double idleTime=now-last_idle_time;
+		if(estimate_weight_interval_bytes_>0 && link_capacity_>0)
+			weight_sum_estimate=weight_sum_estimate*pow(estimate_weight_alpha_,idleTime/(estimate_weight_interval_bytes_*8/link_capacity_));
+		else
+			weight_sum_estimate=0;
+		last_update_time=now;
+
+		if(debug_)
+			printf("%.9f smooth weight sum is reset to %f\n",now,weight_sum_estimate);
+	}
 
 	/* The shared buffer is overfilld */
 	if(TotalByteLength()+pktSize>qlimBytes)
@@ -250,11 +297,6 @@ void WFQ::enque(Packet *p)
 		}
 	}
 
-	/* Update weight_sum_estimate */
-	/*weight_sum_estimate=weight_sum_estimate*estimate_weight_alpha_+weight_sum*(1-estimate_weight_alpha_);
-	if(debug_)
-		printf("sample weight sum: %f smooth weight sum: %f\n",weight_sum,weight_sum_estimate);*/
-
 	/* Enqueue ECN marking */
 	qs[prio].q_->enque(p);
 	if(MarkingECN(prio)>0&&hf->ect())
@@ -272,62 +314,69 @@ Packet *WFQ::deque(void)
 	int queue=-1;
 	int tot_len=TotalByteLength();
 
-	/* look for the candidate queue with the earliest virtual finish time */
-	for(i=0; i<queue_num_; i++)
+	/* Switch port is not empty */
+	if(tot_len>0)
 	{
-		if (qs[i].q_->length()==0)
-			continue;
-
-		if (qs[i].headFinishTime<minT)
+		/* look for the candidate queue with the earliest virtual finish time */
+		for(i=0; i<queue_num_; i++)
 		{
-			queue=i;
-			minT=qs[i].headFinishTime;
-		}
-	}
+			if (qs[i].q_->length()==0)
+				continue;
 
-	if (queue==-1)
-	{
-		//For debug. This should not happen
-		if(tot_len>0)
+			if (qs[i].headFinishTime<minT)
+			{
+				queue=i;
+				minT=qs[i].headFinishTime;
+			}
+		}
+
+		if(queue==-1 && tot_len>0)
+		{
 			fprintf (stderr,"not work conserving\n");
-		return NULL;
-	}
-
-	pkt=qs[queue].q_->deque();
-	pktSize=hdr_cmn::access(pkt)->size();
-
-	/* Set the headFinishTime for the remaining head packet in the queue */
-	nextPkt=qs[queue].q_->head();
-	if (nextPkt!=NULL)
-	{
-		if(qs[queue].weight>0)
-		{
-			qs[queue].headFinishTime=qs[queue].headFinishTime+(hdr_cmn::access(nextPkt)->size())/qs[queue].weight;
-			if(currTime<qs[queue].headFinishTime)
-				currTime=qs[queue].headFinishTime;
-		}
-		else
-		{
-			fprintf (stderr,"dequeue: illegal weight value\n");
 			exit(1);
 		}
+
+		pkt=qs[queue].q_->deque();
+		pktSize=hdr_cmn::access(pkt)->size();
+		/* Set the headFinishTime for the remaining head packet in the queue */
+		nextPkt=qs[queue].q_->head();
+		if(nextPkt!=NULL)
+		{
+			if(qs[queue].weight>0)
+			{
+				qs[queue].headFinishTime=qs[queue].headFinishTime+(hdr_cmn::access(nextPkt)->size())/qs[queue].weight;
+				if(currTime<qs[queue].headFinishTime)
+					currTime=qs[queue].headFinishTime;
+			}
+			else
+			{
+				fprintf (stderr,"dequeue: illegal weight value\n");
+				exit(1);
+			}
+		}
+		/* After dequeue, the queue becomes empty */
+		else
+		{
+			weight_sum-=qs[queue].weight;
+			qs[queue].headFinishTime=LDBL_MAX;
+		}
 	}
-	/* After dequeue, the queue becomes empty */
-	else
+
+	if(marking_scheme_==MQ_MARKING_GENER && !estimate_weight_enable_timer_)
 	{
-		weight_sum-=qs[queue].weight;
-		qs[queue].headFinishTime=LDBL_MAX;
+		double now=Scheduler::instance().clock();
+		double timeInterval=now-last_update_time;
+		if(estimate_weight_interval_bytes_>0 && link_capacity_>0 && timeInterval>=0.995*estimate_weight_interval_bytes_*8/link_capacity_)
+		{
+			weight_sum_estimate=weight_sum_estimate*estimate_weight_alpha_+weight_sum*(1-estimate_weight_alpha_);
+			last_update_time=now;
+			if(debug_)
+				printf("%.9f smooth weight sum: %f, sample weight sum: %f\n",now, weight_sum_estimate, weight_sum);
+		}
+
+		if(TotalByteLength()==0)
+			last_idle_time=now;
 	}
-
-	/* If the switch port becomes empty after dequeue, reset weight_sum_estimate back to 0 */
-	if(int(weight_sum)==0)
-		weight_sum_estimate=0;
-	/* Otherwise, update weight_sum_estimate correspondingly */
-	else
-		weight_sum_estimate=weight_sum_estimate*estimate_weight_alpha_+weight_sum*(1-estimate_weight_alpha_);
-
-	if(debug_)
-		printf("sample weight sum: %f smooth weight sum: %f\n",weight_sum,weight_sum_estimate);
 
 	return pkt;
 }
