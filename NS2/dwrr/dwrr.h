@@ -79,8 +79,9 @@ class DWRR : public Queue
 		double port_thresh_;	//per-port ECN marking threshold (pkts)
 		int marking_scheme_;	//ECN marking policy
 		double estimate_round_alpha_;	//factor between 0 and 1 for round time estimation
+		int estimate_round_idle_interval_bytes_;	//Time interval (divided by link capacity) to update round time when link is idle. 
 		double estimate_quantum_alpha_;	//factor between 0 and 1 for quantum estimation
-		double estimate_quantum_interval_bytes_;	//Time interval is estimate_quantum_interval_bytes_/link capacity.
+		int estimate_quantum_interval_bytes_;	//Time interval is estimate_quantum_interval_bytes_/link capacity.
 		int estimate_quantum_enable_timer_;	//Whether we use real timer (TimerHandler) for quantum estimation
 		double link_capacity_;	//Link capacity
 		int debug_;	//debug more(true) or not(false)

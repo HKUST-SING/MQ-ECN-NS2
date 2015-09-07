@@ -81,12 +81,25 @@ DWRR::DWRR(): timer_(this)
 	total_qlen_tchan_=NULL;
 	qlen_tchan_=NULL;
 
+	queue_num_=8;
+	mean_pktsize_=1500;
+	port_thresh_=65;
+	marking_scheme_=0;
+	estimate_round_alpha_=0.75;
+	estimate_round_idle_interval_bytes_=1500;
+	estimate_quantum_alpha_=0.75;
+	estimate_quantum_interval_bytes_=1500;
+	estimate_quantum_enable_timer_=0;
+	link_capacity_=10000000000;
+	debug_=0;
+
 	/* bind variables */
 	bind("queue_num_", &queue_num_);
 	bind("mean_pktsize_", &mean_pktsize_);
 	bind("port_thresh_",&port_thresh_);
 	bind("marking_scheme_",&marking_scheme_);
 	bind("estimate_round_alpha_",&estimate_round_alpha_);
+	bind("estimate_round_idle_interval_bytes_",&estimate_round_idle_interval_bytes_);
 	bind("estimate_quantum_alpha_",&estimate_quantum_alpha_);
 	bind("estimate_quantum_interval_bytes_",&estimate_quantum_interval_bytes_);
 	bind_bool("estimate_quantum_enable_timer_",&estimate_quantum_enable_timer_);
@@ -341,6 +354,25 @@ void DWRR::enque(Packet *p)
 		if(debug_)
 			printf("%.9f smooth quantum sum is reset to %f\n",now,quantum_sum_estimate);
 	}
+	else if(TotalByteLength()==0 && marking_scheme_==MQ_MARKING_RR)
+	{
+		double now=Scheduler::instance().clock();
+		double idleTime=now-last_idle_time;
+		int intervalNum=0;
+		if(estimate_round_idle_interval_bytes_>0 && link_capacity_>0)
+		{
+			intervalNum=int(idleTime/(estimate_round_idle_interval_bytes_*8/link_capacity_));
+			round_time=round_time*pow(estimate_quantum_alpha_,intervalNum);
+		}
+		else
+		{
+			round_time=0;
+		}
+
+		last_update_time=now;
+		if(debug_)
+			printf("%.9f smooth round time is reset to %f after %d idle time slots\n",now, round_time, intervalNum);
+	}
 
 	/* The shared buffer is overfilld */
 	if(TotalByteLength()+pktSize>qlimBytes)
@@ -462,10 +494,12 @@ Packet *DWRR::deque(void)
 			if(debug_)
 				printf("%.9f smooth quantum sum: %f, sample quantum sum: %d\n",now, quantum_sum_estimate, quantum_sum);
 		}
-
-		if(TotalByteLength()==0)
-			last_idle_time=now;
 	}
+
+
+	if(TotalByteLength()==0)
+		last_idle_time=Scheduler::instance().clock();
+
 	return pkt;
 }
 
