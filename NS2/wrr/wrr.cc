@@ -55,26 +55,41 @@ static PacketWRR* RemoveHeadList(PacketWRR* list)
 	}
 }
 
-static class WRRClass : public TclClass 
+static class WRRClass : public TclClass
 {
 	public:
 		WRRClass() : TclClass("Queue/WRR") {}
-		TclObject* create(int argc, const char*const* argv) 
+		TclObject* create(int argc, const char*const* argv)
 		{
 			return (new WRR);
 		}
 } class_dwrr;
 
 WRR::WRR()
-{		
+{
 	queues=new PacketWRR[MAX_QUEUE_NUM];
 	activeList=new PacketWRR();
 	init=false;
 	round_time=0;
-	
+	last_idle_time=0;
+
+	for(int i=0;i<MAX_QUEUE_NUM;i++)
+		queues[i].avgPktSize=1500;
+
+
 	total_qlen_tchan_=NULL;
 	qlen_tchan_=NULL;
-	
+
+	queue_num_=8;
+	mean_pktsize_=1500;
+	port_thresh_=65;
+	marking_scheme_=0;
+	estimate_pktsize_alpha_=0.75;
+	estimate_round_alpha_=0.75;
+	estimate_round_idle_interval_bytes_=1500;
+	link_capacity_=10000000000;
+	debug_=0;
+
 	/* bind variables */
 	bind("queue_num_", &queue_num_);
 	bind("mean_pktsize_", &mean_pktsize_);
@@ -82,12 +97,12 @@ WRR::WRR()
 	bind("marking_scheme_",&marking_scheme_);
 	bind("estimate_pktsize_alpha_",&estimate_pktsize_alpha_);
 	bind("estimate_round_alpha_",&estimate_round_alpha_);
-	bind_bool("estimate_round_filter_",&estimate_round_filter_);
+	bind("estimate_round_idle_interval_bytes_",&estimate_round_idle_interval_bytes_);
 	bind_bw("link_capacity_",&link_capacity_);
 	bind_bool("debug_",&debug_);
 }
 
-WRR::~WRR() 
+WRR::~WRR()
 {
 	delete activeList;
 	delete [] queues;
@@ -116,13 +131,13 @@ int WRR::TotalWeight()
 
 /* Determine whether we need to mark ECN where q is current queue number. Return 1 if it requires marking */
 int WRR::MarkingECN(int q)
-{	
+{
 	if(q<0||q>=queue_num_)
 	{
 		fprintf (stderr,"illegal queue number\n");
 		exit (1);
 	}
-	
+
 	/* Per-queue ECN marking */
 	if(marking_scheme_==PER_QUEUE_MARKING)
 	{
@@ -139,35 +154,20 @@ int WRR::MarkingECN(int q)
 		else
 			return 0;
 	}
-	/* Our new ECN marking schemes (QUEUE_SMART_MARKING or HYBRID_SMRT_MARKING)*/
-	else if(marking_scheme_==QUEUE_SMART_MARKING||marking_scheme_==HYBRID_SMRT_MARKING)
-	{	
-		/* 
-		 *  For HYBRID_SMRT_MARKING, we calculate ECN thresholds when 
-		 *  per-port buffer occupation exceeds a pre-defined threshold for 
-		 */ 
-		if(marking_scheme_==QUEUE_SMART_MARKING||(TotalByteLength()>=port_thresh_*mean_pktsize_&&marking_scheme_==HYBRID_SMRT_MARKING))
-		{			
-			if(round_time>0.000000001&&link_capacity_>0)	//Round time>1ns
-			{
-				double weightedFairRate=queues[q].weight*queues[q].avgPktSize*8/round_time;
-				double thresh=min(weightedFairRate/link_capacity_,1)*port_thresh_;
-				//For debug
-				//printf("round time: %f threshold: %f\n",round_time, thresh);
-				if(queues[q].byteLength()>thresh*mean_pktsize_)
-					return 1;
-				else
-					return 0;
-			}
-			else
-			{
-				return 0;
-			}
-		}
+	/* MQ-ECN for round robin packet scheduling algorithms */
+	else if(marking_scheme_==MQ_MARKING_RR)
+	{
+		double thresh=0;
+		if(round_time>=0.000000001&&link_capacity_>0)
+			thresh=min(queues[q].weight*queues[q].avgPktSize*8/round_time/link_capacity_,1)*port_thresh_;
 		else
-		{
+			thresh=port_thresh_;
+			//For debug
+			//printf("round time: %f threshold: %f\n",round_time, thresh);
+		if(queues[q].byteLength()>thresh*mean_pktsize_)
+			return 1;
+		else
 			return 0;
-		}
 	}
 	/* Unknown ECN marking scheme */
 	else
@@ -177,7 +177,7 @@ int WRR::MarkingECN(int q)
 	}
 }
 
-/* 
+/*
  *  entry points from OTcL to set per queue state variables
  *   - $q set-quantum queue_id queue_quantum (quantum is actually weight)
  *   - $q set-thresh queue_id queue_thresh
@@ -191,26 +191,26 @@ int WRR::command(int argc, const char*const* argv)
 	if(argc==3)
 	{
 		// attach a file to trace total queue length
-		if (strcmp(argv[1], "attach-total") == 0) 
+		if (strcmp(argv[1], "attach-total") == 0)
 		{
 			int mode;
 			const char* id = argv[2];
 			Tcl& tcl = Tcl::instance();
 			total_qlen_tchan_=Tcl_GetChannel(tcl.interp(), (char*)id, &mode);
-			if (total_qlen_tchan_==0) 
+			if (total_qlen_tchan_==0)
 			{
 				tcl.resultf("WRR: trace: can't attach %s for writing", id);
 				return (TCL_ERROR);
 			}
 			return (TCL_OK);
 		}
-		else if (strcmp(argv[1], "attach-queue") == 0) 
+		else if (strcmp(argv[1], "attach-queue") == 0)
 		{
 			int mode;
 			const char* id = argv[2];
 			Tcl& tcl = Tcl::instance();
 			qlen_tchan_=Tcl_GetChannel(tcl.interp(), (char*)id, &mode);
-			if (qlen_tchan_==0) 
+			if (qlen_tchan_==0)
 			{
 				tcl.resultf("WRR: trace: can't attach %s for writing", id);
 				return (TCL_ERROR);
@@ -218,9 +218,9 @@ int WRR::command(int argc, const char*const* argv)
 			return (TCL_OK);
 		}
 	}
-	else if (argc == 4) 
+	else if (argc == 4)
 	{
-		if (strcmp(argv[1], "set-weight")==0) 
+		if (strcmp(argv[1], "set-weight")==0)
 		{
 			int queue_id=atoi(argv[2]);
 			if(queue_id<queue_num_&&queue_id>=0)
@@ -269,7 +269,7 @@ int WRR::command(int argc, const char*const* argv)
 			}
 		}
 	}
-	return (Queue::command(argc, argv));	
+	return (Queue::command(argc, argv));
 }
 
 /* Receive a new packet */
@@ -280,20 +280,28 @@ void WRR::enque(Packet *p)
 	hdr_flags* hf=hdr_flags::access(p);
 	int pktSize=hdr_cmn::access(p)->size();
 	int qlimBytes=qlim_*mean_pktsize_;
-	
-	//For debug
-	//printf("%f",link_capacity_);
-	if(!init)
+	/* 1<=queue_num_<=MAX_QUEUE_NUM */
+	queue_num_=max(min(queue_num_,MAX_QUEUE_NUM),1);
+
+	if(TotalByteLength()==0)
 	{
-		queue_num_=min(queue_num_,MAX_QUEUE_NUM);
-		round_time=TotalWeight()*8/link_capacity_;
-		for(int i=0;i<queue_num_;i++)
+		double now=Scheduler::instance().clock();
+		double idleTime=now-last_idle_time;
+		int intervalNum=0;
+		if(estimate_round_idle_interval_bytes_>0 && link_capacity_>0)
 		{
-			queues[i].avgPktSize=mean_pktsize_;
+			intervalNum=int(idleTime/(estimate_round_idle_interval_bytes_*8/link_capacity_));
+			round_time=round_time*pow(estimate_round_alpha_,intervalNum);
 		}
-		init=true;
+		else
+		{
+			round_time=0;
+		}
+
+		if(debug_)
+			printf("%.9f smooth round time is reset to %f after %d idle time slots\n",now, round_time, intervalNum);
 	}
-	
+
 	/* The shared buffer is overfilld */
 	if(TotalByteLength()+pktSize>qlimBytes)
 	{
@@ -301,18 +309,15 @@ void WRR::enque(Packet *p)
 		//printf("Packet drop\n");
 		return;
 	}
-	
+
 	if(prio>=queue_num_||prio<0)
 		prio=queue_num_-1;
 
-	/* Enqueue ECN marking */
-	queues[prio].enque(p); 		
-	if(MarkingECN(prio)>0&&hf->ect())	
-		hf->ce() = 1;
-		
+
+	queues[prio].enque(p);
 	/* Upadate average packet size for queues[prio] */
 	queues[prio].avgPktSize=queues[prio].avgPktSize*estimate_pktsize_alpha_+pktSize*(1-estimate_pktsize_alpha_);
-	
+
 	/* if queues[prio] is not in activeList */
 	if(queues[prio].active==false)
 	{
@@ -322,7 +327,11 @@ void WRR::enque(Packet *p)
 		queues[prio].start_time=Scheduler::instance().clock();	//Start time of this round
 		InsertTailList(activeList, &queues[prio]);
 	}
-	
+
+	/* Enqueue ECN marking */
+	if(MarkingECN(prio)>0&&hf->ect())
+		hf->ce() = 1;
+
 	trace_qlen();
 	trace_total_qlen();
 }
@@ -331,18 +340,18 @@ Packet *WRR::deque(void)
 {
 	PacketWRR *headNode=NULL;
 	Packet *pkt=NULL;
-	int pktSize;
-	
+	int pktSize=0;
+
 	/*At least one queue is active, activeList is not empty */
 	if(TotalByteLength()>0)
 	{
 		/* We must go through all actives queues and select a packet to dequeue */
 		while(1)
 		{
-			headNode=activeList->next;	//Get head node from activeList					
+			headNode=activeList->next;	//Get head node from activeList
 			if(headNode==NULL)
 				fprintf (stderr,"no active flow\n");
-			
+
 			/* if headNode is not empty */
 			if(headNode->length()>0)
 			{
@@ -352,7 +361,7 @@ Packet *WRR::deque(void)
 					headNode->counter=headNode->weight;
 					headNode->current=true;
 				}
-				
+
 				/* if we can dequeue the head packet */
 				if(headNode->counter>0)
 				{
@@ -360,19 +369,16 @@ Packet *WRR::deque(void)
 					pktSize=hdr_cmn::access(pkt)->size();
 					headNode->counter--;
 					//printf("deque a packet\n");
-					
+
 					/* After dequeue, headNode becomes empty queue */
 					if(headNode->length()==0)
 					{
-						/* If we enable estimate_round_filter_, we only sample when this queue exactly uses up its weight */
-						if((headNode->counter==0&&estimate_round_filter_)||(!estimate_round_filter_))
-						{
-							/* The packet has not been sent yet */
-							double round_time_sample=Scheduler::instance().clock()-headNode->start_time+pktSize*8/link_capacity_;
-							round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
-							if(debug_)
-								printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
-						}
+						/* The packet has not been sent yet */
+						double round_time_sample=Scheduler::instance().clock()-headNode->start_time+pktSize*8/link_capacity_;
+						round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
+						if(debug_)
+							printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
+
 						headNode=RemoveHeadList(activeList);	//Remove head node from activeList
 						headNode->counter=0;
 						headNode->active=false;
@@ -383,34 +389,39 @@ Packet *WRR::deque(void)
 				/* if we don't have enough weight to dequeue the head packet and the queue is not empty */
 				else
 				{
-					headNode=RemoveHeadList(activeList);	
+					headNode=RemoveHeadList(activeList);
 					headNode->counter=0;
 					headNode->current=false;
+
 					double round_time_sample=Scheduler::instance().clock()-headNode->start_time;
 				  	round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
 					if(debug_)
 						printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
-					headNode->start_time=Scheduler::instance().clock();	//Reset start time 
+
+					headNode->start_time=Scheduler::instance().clock();	//Reset start time
 					InsertTailList(activeList, headNode);	//Insert to the tail again for next round scheduling
 				}
 			}
-		}	
+		}
 	}
-	
+
+	if(TotalByteLength()==0)
+		last_idle_time=Scheduler::instance().clock();
+
 	return pkt;
 }
 
 /* routine to write total qlen records */
 void WRR::trace_total_qlen()
 {
-	if (total_qlen_tchan_) 
+	if (total_qlen_tchan_)
 	{
 		char wrk[500]={0};
 		int n;
 		double t = Scheduler::instance().clock();
 		sprintf(wrk, "%g, %d", t,TotalByteLength());
 		n=strlen(wrk);
-		wrk[n] = '\n'; 
+		wrk[n] = '\n';
 		wrk[n+1] = 0;
 		(void)Tcl_Write(total_qlen_tchan_, wrk, n+1);
 	}
@@ -419,21 +430,21 @@ void WRR::trace_total_qlen()
 /* routine to write per-queue qlen records */
 void WRR::trace_qlen()
 {
-	if (qlen_tchan_) 
+	if (qlen_tchan_)
 	{
 		char wrk[500]={0};
 		int n;
 		double t = Scheduler::instance().clock();
 		sprintf(wrk, "%g", t);
 		n=strlen(wrk);
-		wrk[n]=0; 
+		wrk[n]=0;
 		(void)Tcl_Write(qlen_tchan_, wrk, n);
-		
+
 		for(int i=0;i<queue_num_; i++)
 		{
 			sprintf(wrk, ", %d",queues[i].byteLength());
 			n=strlen(wrk);
-			wrk[n]=0; 
+			wrk[n]=0;
 			(void)Tcl_Write(qlen_tchan_, wrk, n);
 		}
 		(void)Tcl_Write(qlen_tchan_, "\n", 1);
