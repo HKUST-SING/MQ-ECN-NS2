@@ -449,20 +449,15 @@ Packet *DWRR::deque(void)
 					if(headNode->length()==0)
 					{
 						round_time_sample=Scheduler::instance().clock()-headNode->start_time+pktSize*8/link_capacity_;
+						round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
+						if(debug_&&marking_scheme_==MQ_MARKING_RR)
+							printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
+
 						quantum_sum-=headNode->quantum;
 						headNode=RemoveHeadList(activeList);
 						headNode->deficitCounter=0;
 						headNode->active=false;
 						headNode->current=false;
-
-						/* If the switch port is empty, reset round_time to 0 */
-						if(quantum_sum==0)
-							round_time=0;
-						else
-							round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
-
-						if(debug_&&marking_scheme_==MQ_MARKING_RR)
-							printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
 					}
 					break;
 				}
@@ -472,10 +467,10 @@ Packet *DWRR::deque(void)
 					headNode=RemoveHeadList(activeList);
 					headNode->current=false;
 					round_time_sample=Scheduler::instance().clock()-headNode->start_time;
-					//printf ("now %f start time %f\n", Scheduler::instance().clock(),headNode->start_time);
 				  	round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
 					if(debug_&&marking_scheme_==MQ_MARKING_RR)
 						printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
+
 					headNode->start_time=Scheduler::instance().clock();	//Reset start time
 					InsertTailList(activeList, headNode);
 				}
@@ -495,7 +490,6 @@ Packet *DWRR::deque(void)
 				printf("%.9f smooth quantum sum: %f, sample quantum sum: %d\n",now, quantum_sum_estimate, quantum_sum);
 		}
 	}
-
 
 	if(TotalByteLength()==0)
 		last_idle_time=Scheduler::instance().clock();
