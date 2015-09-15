@@ -21,16 +21,13 @@ class WRR;
 class PacketWRR: public PacketQueue
 {
 	public:
-		PacketWRR(): weight(1),counter(0),thresh(0),active(false),current(false),start_time(0),next(NULL) {}
+		PacketWRR(): quantum(2000),counter(0),thresh(0),start_time(0), counter_updated(false) {}
 
-		int weight;	//weight of this queue
-		int counter;	//counter for packets that can be sent in this round
-		int avgPktSize;	//Average packet size (bytes)
+		int quantum;	//quantum of this queue
+		int counter;	//counter for bytes that can be sent in this round
 		double thresh;	// per-queue ECN marking threshold (pkts)
-		bool active;	//whether this queue is active (qlen>0)
-		bool current;	//whether this queue is currently being served (deficitCounter has been updated for thie round)
-		double start_time;	//time when this queue is inserted to active list
-		PacketWRR *next;	//pointer to next node
+		double start_time;	//time when the queue waits for scheduling in this round
+		bool counter_updated; //whether the counter has been updated in this round
 
 		friend class WRR;
 };
@@ -46,21 +43,19 @@ class WRR : public Queue
 		Packet *deque(void);
 		void enque(Packet *pkt);
 		int TotalByteLength();	//Get total length of all queues in bytes
-		int TotalWeight();	//Get sum of weight
 		int MarkingECN(int q); //Determine whether we need to mark ECN, q is current queue number
 
 		/* Variables */
 		PacketWRR *queues;	//underlying multi-FIFO (CoS) queues
-		PacketWRR *activeList;	//list for active queues
 		double round_time;	//Round time estimation value
 		double last_idle_time;	//Last time when link becomes idle
 		bool init;
+		int current;	//current queue ID
 
 		int queue_num_;	//number of queues
 		int mean_pktsize_;	//MTU in bytes
 		double port_thresh_;	//per-port ECN marking threshold (pkts)
 		int marking_scheme_;	//ECN marking policy
-		double estimate_pktsize_alpha_;	//factor between 0 and 1 for average packet size estimation
 		double estimate_round_alpha_;	//factor between 0 and 1 for round time estimation
 		int estimate_round_idle_interval_bytes_;	//Time interval (divided by link capacity) to update round time when link is idle.
 		double link_capacity_;	//Link capacity

@@ -7,8 +7,8 @@ set K_0 4; #The per-queue ECN marking threshold of the first queue
 set K_1 16; #The per-queue ECN marking threshold of the second queue
 set MSS_0 1460;	#MSS for service 0
 set MSS_1 1460;	#MSS for service 1
-set W_0 1; #The weight of the first queue
-set W_1 3; #The weight of the second queue
+set W_0 2000; #The weight of the first queue
+set W_1 4000; #The weight of the second queue
 set marking_schme 3
 
 set RTT 0.0001
@@ -70,8 +70,8 @@ $ns simplex-link $receiver $switch $lineRate [expr $RTT/4] DropTail
 
 set L [$ns link $switch $receiver]
 set q [$L set queue_]
-$q set-weight 0 $W_0
-$q set-weight 1 $W_1
+$q set-quantum 0 $W_0
+$q set-quantum 1 $W_1
 $q set-thresh 0 $K_0
 $q set-thresh 1 $K_1
 $q attach-total $tot_qlenfile

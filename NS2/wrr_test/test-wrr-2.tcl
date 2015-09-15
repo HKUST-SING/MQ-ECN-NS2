@@ -11,9 +11,9 @@ set K_port 80;	#The per-port ECN marking threshold
 set K_0 10; #The per-queue ECN marking threshold of the first queue
 set K_1 10; #The per-queue ECN marking threshold of the second queue
 set K_2 10; #The per-queue ECN marking threshold of the third queue
-set W_0 1; #The weight of the first queue
-set W_1 1; #The weight of the second queue
-set W_2 1; #The weight of the third  queue
+set W_0 2000; #The weight of the first queue
+set W_1 2000; #The weight of the second queue
+set W_2 2000; #The weight of the third  queue
 set marking_schme 3
 
 set RTT 0.0001
@@ -75,9 +75,9 @@ $ns simplex-link $receiver $switch $lineRate [expr $RTT/4] DropTail
 
 set L [$ns link $switch $receiver]
 set q [$L set queue_]
-$q set-weight 0 $W_0
-$q set-weight 1 $W_1
-$q set-weight 2 $W_2
+$q set-quantum 0 $W_0
+$q set-quantum 1 $W_1
+$q set-quantum 2 $W_2
 $q set-thresh 0 $K_0
 $q set-thresh 1 $K_1
 $q set-thresh 2 $K_2

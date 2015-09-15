@@ -8,52 +8,6 @@
 #define max(arg1,arg2) (arg1>arg2 ? arg1 : arg2)
 #define min(arg1,arg2) (arg1<arg2 ? arg1 : arg2)
 
-/* Insert a queue to the tail of an active list. Return true if insert succeeds */
-static void InsertTailList(PacketWRR* list, PacketWRR *q)
-{
-	if(q!=NULL && list !=NULL)
-	{
-		PacketWRR* tmp=list;
-		while(true)
-		{
-			/* Arrive at the tail of this list */
-			if(tmp->next==NULL)
-			{
-				tmp->next=q;
-				q->next=NULL;
-				return;
-			}
-			/* Move to next node */
-			else
-			{
-				tmp=tmp->next;
-			}
-		}
-	}
-}
-
-/* Remove and return the head node from the active list */
-static PacketWRR* RemoveHeadList(PacketWRR* list)
-{
-	if(list!=NULL)
-	{
-		PacketWRR* tmp=list->next;
-		if(tmp!=NULL)
-		{
-			list->next=tmp->next;
-			return tmp;
-		}
-		/* This list is empty */
-		else
-		{
-			return NULL;
-		}
-	}
-	else
-	{
-		return NULL;
-	}
-}
 
 static class WRRClass : public TclClass
 {
@@ -68,14 +22,10 @@ static class WRRClass : public TclClass
 WRR::WRR()
 {
 	queues=new PacketWRR[MAX_QUEUE_NUM];
-	activeList=new PacketWRR();
-	init=false;
 	round_time=0;
 	last_idle_time=0;
-
-	for(int i=0;i<MAX_QUEUE_NUM;i++)
-		queues[i].avgPktSize=1500;
-
+	init=false;
+	current=0;
 
 	total_qlen_tchan_=NULL;
 	qlen_tchan_=NULL;
@@ -84,7 +34,6 @@ WRR::WRR()
 	mean_pktsize_=1500;
 	port_thresh_=65;
 	marking_scheme_=0;
-	estimate_pktsize_alpha_=0.75;
 	estimate_round_alpha_=0.75;
 	estimate_round_idle_interval_bytes_=1500;
 	link_capacity_=10000000000;
@@ -95,7 +44,6 @@ WRR::WRR()
 	bind("mean_pktsize_", &mean_pktsize_);
 	bind("port_thresh_",&port_thresh_);
 	bind("marking_scheme_",&marking_scheme_);
-	bind("estimate_pktsize_alpha_",&estimate_pktsize_alpha_);
 	bind("estimate_round_alpha_",&estimate_round_alpha_);
 	bind("estimate_round_idle_interval_bytes_",&estimate_round_idle_interval_bytes_);
 	bind_bw("link_capacity_",&link_capacity_);
@@ -104,7 +52,6 @@ WRR::WRR()
 
 WRR::~WRR()
 {
-	delete activeList;
 	delete [] queues;
 }
 
@@ -115,16 +62,6 @@ int WRR::TotalByteLength()
 	for(int i=0;i<queue_num_;i++)
 	{
 		result+=queues[i].byteLength();
-	}
-	return result;
-}
-
-int WRR::TotalWeight()
-{
-	int result=0;
-	for(int i=0;i<queue_num_;i++)
-	{
-		result+=queues[i].weight;
 	}
 	return result;
 }
@@ -159,11 +96,14 @@ int WRR::MarkingECN(int q)
 	{
 		double thresh=0;
 		if(round_time>=0.000000001&&link_capacity_>0)
-			thresh=min(queues[q].weight*queues[q].avgPktSize*8/round_time/link_capacity_,1)*port_thresh_;
+			thresh=min(queues[q].quantum*8/round_time/link_capacity_,1)*port_thresh_;
 		else
 			thresh=port_thresh_;
-			//For debug
-			//printf("round time: %f threshold: %f\n",round_time, thresh);
+
+		//For debug
+		if(debug_)
+			printf("round time: %.9f threshold of queue %d: %f\n",round_time, q, thresh);
+
 		if(queues[q].byteLength()>thresh*mean_pktsize_)
 			return 1;
 		else
@@ -220,20 +160,20 @@ int WRR::command(int argc, const char*const* argv)
 	}
 	else if (argc == 4)
 	{
-		if (strcmp(argv[1], "set-weight")==0)
+		if (strcmp(argv[1], "set-quantum")==0)
 		{
 			int queue_id=atoi(argv[2]);
 			if(queue_id<queue_num_&&queue_id>=0)
 			{
-				int weight=atoi(argv[3]);
-				if(weight>0)
+				int quantum=atoi(argv[3]);
+				if(quantum>0)
 				{
-					queues[queue_id].weight=weight;
+					queues[queue_id].quantum=quantum;
 					return (TCL_OK);
 				}
 				else
 				{
-					fprintf (stderr,"illegal weight value %s for queue %s\n", argv[3], argv[2]);
+					fprintf (stderr,"illegal quantum value %s for queue %s\n", argv[3], argv[2]);
 					exit (1);
 				}
 			}
@@ -275,6 +215,7 @@ int WRR::command(int argc, const char*const* argv)
 /* Receive a new packet */
 void WRR::enque(Packet *p)
 {
+	int i=0;
 	hdr_ip *iph=hdr_ip::access(p);
 	int prio=iph->prio();
 	hdr_flags* hf=hdr_flags::access(p);
@@ -298,8 +239,13 @@ void WRR::enque(Packet *p)
 			round_time=0;
 		}
 
+		/* Reset start time for all queues */
+		for(i=0;i<queue_num_;i++)
+			queues[i].start_time=now;
+
 		if(debug_)
 			printf("%.9f smooth round time is reset to %f after %d idle time slots\n",now, round_time, intervalNum);
+
 	}
 
 	/* The shared buffer is overfilld */
@@ -313,21 +259,7 @@ void WRR::enque(Packet *p)
 	if(prio>=queue_num_||prio<0)
 		prio=queue_num_-1;
 
-
 	queues[prio].enque(p);
-	/* Upadate average packet size for queues[prio] */
-	queues[prio].avgPktSize=queues[prio].avgPktSize*estimate_pktsize_alpha_+pktSize*(1-estimate_pktsize_alpha_);
-
-	/* if queues[prio] is not in activeList */
-	if(queues[prio].active==false)
-	{
-		queues[prio].counter=0;
-		queues[prio].active=true;
-		queues[prio].current=false;
-		queues[prio].start_time=Scheduler::instance().clock();	//Start time of this round
-		InsertTailList(activeList, &queues[prio]);
-	}
-
 	/* Enqueue ECN marking */
 	if(MarkingECN(prio)>0&&hf->ect())
 		hf->ce() = 1;
@@ -338,75 +270,74 @@ void WRR::enque(Packet *p)
 
 Packet *WRR::deque(void)
 {
-	PacketWRR *headNode=NULL;
 	Packet *pkt=NULL;
 	int pktSize=0;
+	double now=Scheduler::instance().clock();
 
-	/*At least one queue is active, activeList is not empty */
+	/*At least one queue is active*/
 	if(TotalByteLength()>0)
 	{
-		/* We must go through all actives queues and select a packet to dequeue */
 		while(1)
 		{
-			headNode=activeList->next;	//Get head node from activeList
-			if(headNode==NULL)
-				fprintf (stderr,"no active flow\n");
-
-			/* if headNode is not empty */
-			if(headNode->length()>0)
+			/* If current queue is active */
+			if(queues[current].length()>0)
 			{
-				/* headNode has not been served yet in this round */
-				if(headNode->current==false)
+				if(queues[current].counter_updated==false)
 				{
-					headNode->counter=headNode->weight;
-					headNode->current=true;
+					queues[current].counter_updated=true;
+					queues[current].counter=queues[current].quantum;
 				}
 
-				/* if we can dequeue the head packet */
-				if(headNode->counter>0)
-				{
-					pkt=headNode->deque();
-					pktSize=hdr_cmn::access(pkt)->size();
-					headNode->counter--;
-					//printf("deque a packet\n");
+				pkt=queues[current].head();
+				pktSize=hdr_cmn::access(pkt)->size();
 
-					/* After dequeue, headNode becomes empty queue */
-					if(headNode->length()==0)
+				/* We have enough quantum to dequeue this packet */
+				if(pktSize<=queues[current].counter)
+				{
+					pkt=queues[current].deque();
+					queues[current].counter-=pktSize;
+
+					/* After dequeue, current queue becomes empty */
+					if(queues[current].length()==0)
 					{
-						/* The packet has not been sent yet */
-						double round_time_sample=Scheduler::instance().clock()-headNode->start_time+pktSize*8/link_capacity_;
+						double round_time_sample=now-queues[current].start_time+pktSize*8/link_capacity_;
 						round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
-						if(debug_)
+						if(debug_&&marking_scheme_==MQ_MARKING_RR)
 							printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
 
-						headNode=RemoveHeadList(activeList);	//Remove head node from activeList
-						headNode->counter=0;
-						headNode->active=false;
-						headNode->current=false;
+						/* Move to next queue */
+						queues[current].start_time=now+pktSize*8/link_capacity_;
+						queues[current].counter_updated=false;
+						current=(current+1)%queue_num_;
 					}
+
 					break;
 				}
-				/* if we don't have enough weight to dequeue the head packet and the queue is not empty */
+				/* No enough quantum to dequeue this packet */
 				else
 				{
-					headNode=RemoveHeadList(activeList);
-					headNode->counter=0;
-					headNode->current=false;
-
-					double round_time_sample=Scheduler::instance().clock()-headNode->start_time;
-				  	round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
-					if(debug_)
+					double round_time_sample=now-queues[current].start_time;
+					round_time=round_time*estimate_round_alpha_+round_time_sample*(1-estimate_round_alpha_);
+					if(debug_&&marking_scheme_==MQ_MARKING_RR)
 						printf("sample round time: %.9f round time: %.9f\n",round_time_sample,round_time);
 
-					headNode->start_time=Scheduler::instance().clock();	//Reset start time
-					InsertTailList(activeList, headNode);	//Insert to the tail again for next round scheduling
+					queues[current].start_time=now;
+					queues[current].counter_updated=false;
+					current=(current+1)%queue_num_;
 				}
+			}
+			/* Empty queue! No need to do any sample. Just move to next queue */
+			else
+			{
+				queues[current].start_time=now;
+				queues[current].counter_updated=false;
+				current=(current+1)%queue_num_;
 			}
 		}
 	}
 
 	if(TotalByteLength()==0)
-		last_idle_time=Scheduler::instance().clock();
+		last_idle_time=now;
 
 	return pkt;
 }
