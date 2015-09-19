@@ -43,7 +43,7 @@ set fct_log [lindex $argv 22]
 ###set flow_cdf [lindex $argv 24]
 set pktSize 1460;	#packet size in bytes
 set quantum [expr $pktSize+40];	#quantum for each queue (DWRR)
-set wrr_weight 1; #weight for each queue (WRR)
+set wrr_weight [expr $pktSize+40]; #weight for each queue (WRR)
 set wfq_weight 100000; #weight for each queue (WFQ)
 set link_capacity_unit Gb
 
@@ -130,7 +130,7 @@ Queue/WRR set mean_pktsize_ [expr $pktSize+40]
 Queue/WRR set port_thresh_ $DCTCP_K
 Queue/WRR set estimate_pktsize_alpha_ 0.75
 Queue/WRR set estimate_round_alpha_ 0.75
-Queue/WRR set estimate_round_filter_ false
+Queue/WRR set estimate_round_idle_interval_bytes_ [expr $pktSize+40]
 Queue/WRR set link_capacity_ $link_rate$link_capacity_unit
 Queue/WRR set debug_ false
 
@@ -188,7 +188,7 @@ for {set i 0} {$i < $S} {incr i} {
 		if {[string compare $switchAlg "DWRR"] == 0} {
 			$q set-quantum $service_i $quantum
 		} elseif {[string compare $switchAlg "WRR"] == 0} {
-			$q set-weight $service_i $wrr_weight
+			$q set-quantum $service_i $wrr_weight
 		} elseif {[string compare $switchAlg "WFQ"] == 0} {
 			$q set-weight $service_i $wfq_weight
 		}
@@ -209,7 +209,7 @@ for {set i 0} {$i < $S} {incr i} {
 		if {[string compare $switchAlg "DWRR"] == 0} {
 			$q set-quantum $service_i $quantum
 		} elseif {[string compare $switchAlg "WRR"] == 0} {
-			$q set-weight $service_i $wrr_weight
+			$q set-quantum $service_i $wrr_weight
 		} elseif {[string compare $switchAlg "WFQ"] == 0} {
 			$q set-weight $service_i $wfq_weight
 		}
@@ -237,7 +237,7 @@ for {set i 0} {$i < $topology_tors} {incr i} {
 			if {[string compare $switchAlg "DWRR"] == 0} {
 				$q set-quantum $service_i $quantum
 			} elseif {[string compare $switchAlg "WRR"] == 0} {
-				$q set-weight $service_i $wrr_weight
+				$q set-quantum $service_i $wrr_weight
 			} elseif {[string compare $switchAlg "WFQ"] == 0} {
 				$q set-weight $service_i $wfq_weight
 			}
@@ -258,7 +258,7 @@ for {set i 0} {$i < $topology_tors} {incr i} {
 			if {[string compare $switchAlg "DWRR"] == 0} {
 				$q set-quantum $service_i $quantum
 			} elseif {[string compare $switchAlg "WRR"] == 0} {
-				$q set-weight $service_i $wrr_weight
+				$q set-quantum $service_i $wrr_weight
 			} elseif {[string compare $switchAlg "WFQ"] == 0} {
 				$q set-weight $service_i $wfq_weight
 			}
@@ -292,11 +292,13 @@ for {set j 0} {$j < $S } {incr j} {
     for {set i 0} {$i < $S } {incr i} {
 		if {$i != $j} {
             set agtagr($i,$j) [new Agent_Aggr_pair]
-            #Choose service randomly
+
+            #Assign service ID
             set service_id [expr {($j*$S+$i) % $service_num}]
             $agtagr($i,$j) setup $s($i) $s($j) "$i $j" $connections_per_pair $init_fid  $service_id "TCP_pair"
             $agtagr($i,$j) attach-logfile $flowlog
 
+            #Assign flow size distribution
             set flow_cdf "CDF_vl2.tcl"
             set meanFlowSize 7495019
             set dist "vl2"
@@ -312,7 +314,7 @@ for {set j 0} {$j < $S } {incr j} {
                 set dist "dctcp"
             } elseif {$service_id % 4==2} {
                 set flow_cdf "CDF_hadoop.tcl"
-                set meanFlowSize 1389780
+                set meanFlowSize 4149016
                 set dist "hadoop"
             }
 
@@ -321,7 +323,7 @@ for {set j 0} {$j < $S } {incr j} {
 
 			#For Poisson
 			$agtagr($i,$j) set_PCarrival_process  [expr $lambda/($S - 1)] $flow_cdf [expr 17*$i+1244*$j] [expr 33*$i+4369*$j]
-			#$ns at 0.1 "$agtagr($i,$j) warmup 0.5 5"
+			$ns at 0.1 "$agtagr($i,$j) warmup 0.5 5"
 			$ns at 1 "$agtagr($i,$j) init_schedule"
 
 			set init_fid [expr $init_fid + $connections_per_pair];
