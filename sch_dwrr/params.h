@@ -33,6 +33,8 @@
 /* MQ-ECN for round-robin packet scheduling algorithms */
 #define DWRR_QDISC_MQ_ECN_RR 4
 
+#define DWRR_QDISC_MAX_ITERATION 10
+
 /* Debug mode or not */
 extern int DWRR_QDISC_DEBUG_MODE;
 /* Buffer management mode: shared (0) or static (1)*/
@@ -49,6 +51,8 @@ extern int DWRR_QDISC_ECN_SCHEME;
 extern int DWRR_QDISC_QUANTUM_ALPHA;
 /* Alpha for round time estimation */
 extern int DWRR_QDISC_ROUND_ALPHA;
+/* Idle time interval */
+extern int DWRR_QDISC_IDLE_INTERVAL_NS;
 
 /* Per queue ECN marking threshold (bytes) */
 extern int DWRR_QDISC_QUEUE_THRESH_BYTES[DWRR_QDISC_MAX_QUEUES];
@@ -65,7 +69,7 @@ struct DWRR_QDISC_Param
 	int *ptr;
 };
 
-extern struct DWRR_QDISC_Param DWRR_QDISC_Params[8+4*DWRR_QDISC_MAX_QUEUES+1];
+extern struct DWRR_QDISC_Param DWRR_QDISC_Params[9+4*DWRR_QDISC_MAX_QUEUES+1];
 
 /* Intialize parameters and register sysctl */
 int dwrr_qdisc_params_init(void);

@@ -18,6 +18,8 @@ int DWRR_QDISC_ECN_SCHEME=DWRR_QDISC_QUEUE_ECN;
 int DWRR_QDISC_QUANTUM_ALPHA=750;
 /* Alpha for round time estimation. It is 0.75 by default. */
 int DWRR_QDISC_ROUND_ALPHA=750;
+/* Idle time slot. It is 12us by default */
+int DWRR_QDISC_IDLE_INTERVAL_NS=12000;
 
 int DWRR_QDISC_DEBUG_MODE_MIN=DWRR_QDISC_DEBUG_OFF;
 int DWRR_QDISC_DEBUG_MODE_MAX=DWRR_QDISC_DEBUG_ON;
@@ -43,8 +45,8 @@ int DWRR_QDISC_QUEUE_QUANTUM[DWRR_QDISC_MAX_QUEUES];
 /* Per queue minimum guarantee buffer (bytes) */
 int DWRR_QDISC_QUEUE_BUFFER_BYTES[DWRR_QDISC_MAX_QUEUES];
 
-/* All parameters that can be configured through sysctl. We have 8+4*DWRR_QDISC_MAX_QUEUES parameters in total. */
-struct DWRR_QDISC_Param DWRR_QDISC_Params[8+4*DWRR_QDISC_MAX_QUEUES+1]={
+/* All parameters that can be configured through sysctl. We have 9+4*DWRR_QDISC_MAX_QUEUES parameters in total. */
+struct DWRR_QDISC_Param DWRR_QDISC_Params[9+4*DWRR_QDISC_MAX_QUEUES+1]={
 	{"debug_mode", &DWRR_QDISC_DEBUG_MODE},
 	{"buffer_mode",&DWRR_QDISC_BUFFER_MODE},
 	{"shared_buffer_bytes", &DWRR_QDISC_SHARED_BUFFER_BYTES},
@@ -53,9 +55,11 @@ struct DWRR_QDISC_Param DWRR_QDISC_Params[8+4*DWRR_QDISC_MAX_QUEUES+1]={
 	{"ecn_scheme",&DWRR_QDISC_ECN_SCHEME},
 	{"quantum_alpha",&DWRR_QDISC_QUANTUM_ALPHA},
 	{"round_alpha",&DWRR_QDISC_ROUND_ALPHA},
+	{"idle_interval_ns",&DWRR_QDISC_IDLE_INTERVAL_NS},
 };
 
-struct ctl_table DWRR_QDISC_Params_table[8+4*DWRR_QDISC_MAX_QUEUES+1];
+struct ctl_table DWRR_QDISC_Params_table[9+4*DWRR_QDISC_MAX_QUEUES+1];
+
 struct ctl_path DWRR_QDISC_Params_path[] = {
 	{ .procname = "dwrr" },
 	{ },
@@ -71,30 +75,30 @@ int dwrr_qdisc_params_init()
 	for(i=0;i<DWRR_QDISC_MAX_QUEUES;i++)
 	{
 		/* Initialize DWRR_QDISC_QUEUE_THRESH_BYTES[DWRR_QDISC_MAX_QUEUES]*/
-		snprintf(DWRR_QDISC_Params[8+i].name, 63,"queue_thresh_bytes_%d",i);
-		DWRR_QDISC_Params[8+i].ptr=&DWRR_QDISC_QUEUE_THRESH_BYTES[i];
+		snprintf(DWRR_QDISC_Params[9+i].name, 63,"queue_thresh_bytes_%d",i);
+		DWRR_QDISC_Params[9+i].ptr=&DWRR_QDISC_QUEUE_THRESH_BYTES[i];
 		DWRR_QDISC_QUEUE_THRESH_BYTES[i]=DWRR_QDISC_PORT_THRESH_BYTES;
 
 		/* Initialize DWRR_QDISC_QUEUE_DSCP[DWRR_QDISC_MAX_QUEUES] */
-		snprintf(DWRR_QDISC_Params[8+i+DWRR_QDISC_MAX_QUEUES].name,63,"queue_dscp_%d",i);
-		DWRR_QDISC_Params[8+i+DWRR_QDISC_MAX_QUEUES].ptr=&DWRR_QDISC_QUEUE_DSCP[i];
+		snprintf(DWRR_QDISC_Params[9+i+DWRR_QDISC_MAX_QUEUES].name,63,"queue_dscp_%d",i);
+		DWRR_QDISC_Params[9+i+DWRR_QDISC_MAX_QUEUES].ptr=&DWRR_QDISC_QUEUE_DSCP[i];
 		DWRR_QDISC_QUEUE_DSCP[i]=i;
 
 		/* Initialize DWRR_QDISC_QUEUE_QUANTUM[DWRR_QDISC_MAX_QUEUES] */
-		snprintf(DWRR_QDISC_Params[8+i+2*DWRR_QDISC_MAX_QUEUES].name,63,"queue_quantum_%d",i);
-		DWRR_QDISC_Params[8+i+2*DWRR_QDISC_MAX_QUEUES].ptr=&DWRR_QDISC_QUEUE_QUANTUM[i];
+		snprintf(DWRR_QDISC_Params[9+i+2*DWRR_QDISC_MAX_QUEUES].name,63,"queue_quantum_%d",i);
+		DWRR_QDISC_Params[9+i+2*DWRR_QDISC_MAX_QUEUES].ptr=&DWRR_QDISC_QUEUE_QUANTUM[i];
 		DWRR_QDISC_QUEUE_QUANTUM[i]=DWRR_QDISC_MTU_BYTES;
 
 		/* Initialize DWRR_QDISC_QUEUE_BUFFER_BYTES[DWRR_QDISC_MAX_QUEUES] */
-		snprintf(DWRR_QDISC_Params[8+i+3*DWRR_QDISC_MAX_QUEUES].name,63,"queue_buffer_bytes_%d",i);
-		DWRR_QDISC_Params[8+i+3*DWRR_QDISC_MAX_QUEUES].ptr=&DWRR_QDISC_QUEUE_BUFFER_BYTES[i];
+		snprintf(DWRR_QDISC_Params[9+i+3*DWRR_QDISC_MAX_QUEUES].name,63,"queue_buffer_bytes_%d",i);
+		DWRR_QDISC_Params[9+i+3*DWRR_QDISC_MAX_QUEUES].ptr=&DWRR_QDISC_QUEUE_BUFFER_BYTES[i];
 		DWRR_QDISC_QUEUE_BUFFER_BYTES[i]=DWRR_QDISC_MAX_BUFFER_BYTES;
 	}
 
 	/* End of the parameters */
-	DWRR_QDISC_Params[8+4*DWRR_QDISC_MAX_QUEUES].ptr=NULL;
+	DWRR_QDISC_Params[9+4*DWRR_QDISC_MAX_QUEUES].ptr=NULL;
 
-	for(i=0; i<8+4*DWRR_QDISC_MAX_QUEUES+1; i++)
+	for(i=0; i<9+4*DWRR_QDISC_MAX_QUEUES+1; i++)
 	{
 		struct ctl_table *entry = &DWRR_QDISC_Params_table[i];
 
@@ -143,14 +147,14 @@ int dwrr_qdisc_params_init()
 			entry->extra2=&DWRR_QDISC_ROUND_ALPHA_MAX;
 		}
 		/* DWRR_QDISC_QUEUE_DSCP[] */
-		else if(i>=8+DWRR_QDISC_MAX_QUEUES&&i<8+2*DWRR_QDISC_MAX_QUEUES)
+		else if(i>=9+DWRR_QDISC_MAX_QUEUES&&i<9+2*DWRR_QDISC_MAX_QUEUES)
 		{
 			entry->proc_handler=&proc_dointvec_minmax;
 			entry->extra1=&DWRR_QDISC_DSCP_MIN;
 			entry->extra2=&DWRR_QDISC_DSCP_MAX;
 		}
 		/* DWRR_QDISC_QUEUE_QUANTUM[] */
-		else if(i>=8+2*DWRR_QDISC_MAX_QUEUES&&i<8+3*DWRR_QDISC_MAX_QUEUES)
+		else if(i>=9+2*DWRR_QDISC_MAX_QUEUES&&i<9+3*DWRR_QDISC_MAX_QUEUES)
 		{
 			entry->proc_handler=&proc_dointvec_minmax;
 			entry->extra1=&DWRR_QDISC_QUANTUM_MIN;
