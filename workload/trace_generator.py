@@ -8,7 +8,7 @@ import math
 #This function is to print usage of this script
 def usage():
 	sys.stderr.write('This script is used to generate dynamic flow workloads:\n')
-	sys.stderr.write('trace_generator.py [traffic distribution file] [load] [link capacity (Mbps)] [flow number] [host number] [service number] [output file]\n')
+	sys.stderr.write('%s [traffic distribution file] [load] [link capacity (Mbps)] [flow number] [host number] [service number] [output file] [service weight 1] ... [service weight N]\n' % sys.argv[0])
 
 #http://preshing.com/20111007/how-to-generate-random-timings-for-a-poisson-process/
 #Return next time interval (ms) 
@@ -33,9 +33,22 @@ def flowsize(distribution, random):
 			i=i+1
 	#By default, return 0
 	return 0
+
+def randomWeight(weightArr, serviceNum):
+	if len(weightArr)!=serviceNum:
+		print 'Unmatched service weights\n'
+		sys.exit(0)
 	
+	x=random.randint(1,sum(weightArr))
+	for i in range(len(weightArr)):
+		if x>weightArr[i]:
+			x=x-weightArr[i]
+		else:
+			return i
+	return 0
+			
 #main function
-if len(sys.argv)!=8:
+if len(sys.argv)<=8:
 	usage()
 else:
 	traffic_filename=sys.argv[1]
@@ -45,6 +58,18 @@ else:
 	host_num=int(sys.argv[5])
 	service_num=int(sys.argv[6])
 	output_filename=sys.argv[7]
+	weightStrArr=sys.argv[8:]
+	
+	if len(weightStrArr)!=service_num:
+		print 'Unmatched service weights\n'
+		sys.exit(0)
+		
+	weights=[]
+	for w in weightStrArr:
+		if int(w)<=0:
+			print 'Invalid service weight value %s' % w
+			sys.exit(0)
+		weights.append(int(w))
 	
 	#Initialize flow distribution 
 	distribution=[]
@@ -88,10 +113,13 @@ else:
 	#Trace format: time_interval flow_size host_id service_id 
 	output_file=open(output_filename,'w')
 	for i in range(flow_num):
-		output_file.write(str(times[i])+' '+str(flows[i])+' '+str(random.randint(0,host_num-1))+' '+str(random.randint(0,service_num-1))+'\n')
+		service_id=randomWeight(weights, service_num)
+		services_flow[service_id]=services_flow[service_id]+1
+		output_file.write(str(times[i])+' '+str(flows[i])+' '+str(random.randint(0,host_num-1))+' '+str(service_id)+'\n')
 	output_file.close()
 	
 	print 'Auto generate '+str(len(flows))+' flows:'
+	print services_flow
 	print 'The average flow size: '+str(avg)+' KB'
 	print 'The average request speed: '+str(num)+' requests/second'
 	print 'Dynamic flow emulation will last for about '+str(len(flows)/num)+' seconds'
