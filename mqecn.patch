@@ -1,0 +1,638 @@
+diff -Naur --no-dereference ns-allinone-2.35-raw/ns-2.35/classifier/classifier-mpath.cc ns-allinone-2.35/ns-2.35/classifier/classifier-mpath.cc
+--- ns-allinone-2.35-raw/ns-2.35/classifier/classifier-mpath.cc	2005-08-26 02:58:01.000000000 +0800
++++ ns-allinone-2.35/ns-2.35/classifier/classifier-mpath.cc	2013-06-16 23:47:50.000000000 +0800
+@@ -1,4 +1,5 @@
+-/* -*-	Mode:C++; c-basic-offset:8; tab-width:8; indent-tabs-mode:t -*- */
++/* -*- Mode:C++; c-basic-offset:8; tab-width:8; indent-tabs-mode:t
++              -*- */
+ 
+ /*
+  * Copyright (C) 1997 by the University of Southern California
+@@ -50,21 +51,106 @@
+ #endif
+ 
+ #include "classifier.h"
++#include "ip.h"
+ 
+ class MultiPathForwarder : public Classifier {
+ public:
+-	MultiPathForwarder() : ns_(0) {} 
+-	virtual int classify(Packet*) {
+-		int cl;
++  MultiPathForwarder() : ns_(0), nodeid_(0), nodetype_(0), perflow_(0), checkpathid_(0) {
++		bind("nodeid_", &nodeid_); 
++		bind("nodetype_", &nodetype_);
++		bind("perflow_", &perflow_);
++		bind("checkpathid_", &checkpathid_);
++	} 
++	virtual int classify(Packet* p) {
++      		int cl;
++		hdr_ip* h = hdr_ip::access(p);
++		// Mohammad: multipath support
++		// fprintf(stdout, "perflow_ = %d, rcv packet in classifier\n", perflow_);
++		if (perflow_ || checkpathid_) {		  
++		  /*if (h->flowid() >= 10000000) {
++		  	int fail = ns_;
++			do {
++			  cl = ns_++;
++			  ns_ %= (maxslot_ + 1);
++			} while (slot_[cl] == 0 && ns_ != fail);		
++			return cl;
++			}*/
++		  
++		struct hkey {
++			int nodeid;
++       			nsaddr_t src, dst;
++			int fid;
++		};
++		struct hkey buf_;		
++		buf_.nodeid = nodeid_;
++		buf_.src = mshift(h->saddr());
++		buf_.dst = mshift(h->daddr());
++		buf_.fid = h->flowid();
++		/*if (checkpathid_)
++			buf_.prio = h->prio();
++		else
++		buf_.prio = 0;*/
++		char* bufString = (char*) &buf_;
++		int length = sizeof(hkey);
++
++		unsigned int ms_ = (unsigned int) HashString(bufString, length);
++		if (checkpathid_) {
++		  int pathNum = h->prio();
++		  int pathDig;
++		  for (int i = 0; i < nodetype_; i++) {
++		    pathDig = pathNum % 8;
++		    pathNum /= 8;
++		  }
++		  //printf("%d: %d->%d\n", nodetype_, h->prio(), pathDig);
++		  ms_ += h->prio(); //pathDig;
++		}
++		ms_ %= (maxslot_ + 1);
++		//printf("nodeid = %d, pri = %d, ms = %d\n", nodeid_, buf_.prio, ms_);
++		int fail = ms_;
++		do {
++			cl = ms_++;
++			ms_ %= (maxslot_ + 1);
++		} while (slot_[cl] == 0 && ms_ != fail);
++		//printf("nodeid = %d, pri = %d, cl = %d\n", nodeid_, h->prio(), cl);
++		}
++
++		else {
++		  //hdr_ip* h = hdr_ip::access(p);
++		  //if (h->flowid() == 45) {
++		  //cl = h->prio() % (maxslot_ + 1); 
++		  //}
++		  //else {
+ 		int fail = ns_;
+ 		do {
+ 			cl = ns_++;
+ 			ns_ %= (maxslot_ + 1);
+ 		} while (slot_[cl] == 0 && ns_ != fail);
++		}
++		//}
++	
++		
+ 		return cl;
+ 	}
+ private:
+ 	int ns_;
++	// Mohamamd: adding support for perflow multipath
++	int nodeid_;
++        int nodetype_;
++	int perflow_;
++	int checkpathid_;
++
++	static unsigned int
++	HashString(register const char *bytes,int length)
++	{
++		register unsigned int result;
++		register int i;
++
++		result = 0;
++		for (i = 0;  i < length;  i++) {
++			result += (result<<3) + *bytes++;
++		}
++		return result;
++	}
+ };
+ 
+ static class MultiPathClass : public TclClass {
+diff -Naur --no-dereference ns-allinone-2.35-raw/ns-2.35/queue/red.cc ns-allinone-2.35/ns-2.35/queue/red.cc
+--- ns-allinone-2.35-raw/ns-2.35/queue/red.cc	2011-10-03 06:32:34.000000000 +0800
++++ ns-allinone-2.35/ns-2.35/queue/red.cc	2016-02-14 21:13:54.712568705 +0800
+@@ -559,7 +559,7 @@
+ 		edv_.count_bytes = 0;
+ 		hdr_flags* hf = hdr_flags::access(pickPacketForECN(pkt));
+ 		if (edp_.setbit && hf->ect() && 
+-                     (!edp_.use_mark_p || edv_.v_prob1 < edp_.mark_p)) { 
++		    (!edp_.use_mark_p || edv_.v_prob1 <= edp_.mark_p)) { // For DCTCP: '<' is changed to '<=' here  
+ 			hf->ce() = 1; 	// mark Congestion Experienced bit
+ 			// Tell the queue monitor here - call emark(pkt)
+ 			return (0);	// no drop
+diff -Naur --no-dereference ns-allinone-2.35-raw/ns-2.35/tcl/lib/ns-default.tcl ns-allinone-2.35/ns-2.35/tcl/lib/ns-default.tcl
+--- ns-allinone-2.35-raw/ns-2.35/tcl/lib/ns-default.tcl	2010-07-04 06:45:45.000000000 +0800
++++ ns-allinone-2.35/ns-2.35/tcl/lib/ns-default.tcl	2016-02-14 21:13:54.716568758 +0800
+@@ -1026,6 +1026,10 @@
+ 
+ Agent/TCP set SetCWRonRetransmit_ true ; # added on 2005/06/19.
+ 				 	 # default changed on 2008/06/05. 
++# DCTCP
++Agent/TCP set dctcp_ false;
++Agent/TCP set dctcp_alpha_ 0.0;
++Agent/TCP set dctcp_g_ 0.0625;
+ 
+ # XXX Generate nam trace or plain old text trace for variables. 
+ # When it's true, generate nam trace.
+diff -Naur --no-dereference ns-allinone-2.35-raw/ns-2.35/tcp/tcp.cc ns-allinone-2.35/ns-2.35/tcp/tcp.cc
+--- ns-allinone-2.35-raw/ns-2.35/tcp/tcp.cc	2011-06-20 12:51:46.000000000 +0800
++++ ns-allinone-2.35/ns-2.35/tcp/tcp.cc	2016-02-14 21:13:54.716568758 +0800
+@@ -101,6 +101,9 @@
+         bind("necnresponses_", &necnresponses_);
+         bind("ncwndcuts_", &ncwndcuts_);
+ 	bind("ncwndcuts1_", &ncwndcuts1_);
++	bind("dctcp_", &dctcp_);
++	bind("dctcp_alpha_", &dctcp_alpha_);
++	bind("dctcp_g_", &dctcp_g_);
+ #endif /* TCP_DELAY_BIND_ALL */
+ 
+ }
+@@ -123,6 +126,11 @@
+         delay_bind_init_one("overhead_");
+         delay_bind_init_one("tcpTick_");
+         delay_bind_init_one("ecn_");
++	// DCTCP
++	delay_bind_init_one("dctcp_"); 
++	delay_bind_init_one("dctcp_alpha_");
++	delay_bind_init_one("dctcp_g_");
++
+         delay_bind_init_one("SetCWRonRetransmit_");
+         delay_bind_init_one("old_ecn_");
+         delay_bind_init_one("bugfix_ss_");
+@@ -234,6 +242,10 @@
+         if (delay_bind(varName, localName, "overhead_", &overhead_, tracer)) return TCL_OK;
+         if (delay_bind(varName, localName, "tcpTick_", &tcp_tick_, tracer)) return TCL_OK;
+         if (delay_bind_bool(varName, localName, "ecn_", &ecn_, tracer)) return TCL_OK;
++	// Mohammad
++        if (delay_bind_bool(varName, localName, "dctcp_", &dctcp_, tracer)) return TCL_OK; 
++	if (delay_bind(varName, localName, "dctcp_alpha_", &dctcp_alpha_ , tracer)) return TCL_OK;
++	if (delay_bind(varName, localName, "dctcp_g_", &dctcp_g_ , tracer)) return TCL_OK;
+         if (delay_bind_bool(varName, localName, "SetCWRonRetransmit_", &SetCWRonRetransmit_, tracer)) return TCL_OK;
+         if (delay_bind_bool(varName, localName, "old_ecn_", &old_ecn_ , tracer)) return TCL_OK;
+         if (delay_bind_bool(varName, localName, "bugfix_ss_", &bugfix_ss_ , tracer)) return TCL_OK;
+@@ -1297,6 +1309,8 @@
+ 		} else {
+ 			ssthresh_ = (int) decreasewin;
+ 		}
++	else if (how & CLOSE_SSTHRESH_DCTCP) 
++		ssthresh_ = (int) ((1 - dctcp_alpha_/2.0) * windowd());
+         else if (how & THREE_QUARTER_SSTHRESH)
+ 		if (ssthresh_ < 3*cwnd_/4)
+ 			ssthresh_  = (int)(3*cwnd_/4);
+@@ -1306,6 +1320,8 @@
+ 		if (first_decrease_ == 1 || slowstart || decrease_num_ == 0.5) {
+ 			cwnd_ = halfwin;
+ 		} else cwnd_ = decreasewin;
++	else if (how & CLOSE_CWND_DCTCP)
++		cwnd_ = (1 - dctcp_alpha_/2.0) * windowd();
+         else if (how & CWND_HALF_WITH_MIN) {
+ 		// We have not thought about how non-standard TCPs, with
+ 		// non-standard values of decrease_num_, should respond
+@@ -1328,7 +1344,9 @@
+ 	}
+ 	if (ssthresh_ < 2)
+ 		ssthresh_ = 2;
+-	if (how & (CLOSE_CWND_HALF|CLOSE_CWND_RESTART|CLOSE_CWND_INIT|CLOSE_CWND_ONE))
++	if (cwnd_ < 1)
++		cwnd_ = 1;
++	if (how & (CLOSE_CWND_HALF|CLOSE_CWND_RESTART|CLOSE_CWND_INIT|CLOSE_CWND_ONE|CLOSE_CWND_DCTCP))
+ 		cong_action_ = TRUE;
+ 
+ 	fcnt_ = count_ = 0;
+@@ -1429,6 +1447,9 @@
+ 				rtt_backoff();
+ 			else ecn_backoff_ = 1;
+ 		} else ecn_backoff_ = 0;
++		if (dctcp_)  
++			slowdown(CLOSE_CWND_DCTCP|CLOSE_SSTHRESH_DCTCP);
++		else
+ 		slowdown(CLOSE_CWND_HALF|CLOSE_SSTHRESH_HALF);
+ 		++necnresponses_ ;
+ 		// added by sylvia to count number of ecn responses 
+diff -Naur --no-dereference ns-allinone-2.35-raw/ns-2.35/tcp/tcp-full.cc ns-allinone-2.35/ns-2.35/tcp/tcp-full.cc
+--- ns-allinone-2.35-raw/ns-2.35/tcp/tcp-full.cc	2010-03-08 13:54:54.000000000 +0800
++++ ns-allinone-2.35/ns-2.35/tcp/tcp-full.cc	2015-04-05 01:13:03.000000000 +0800
+@@ -229,6 +229,8 @@
+         if (delay_bind_bool(varName, localName, "ecn_syn_", &ecn_syn_, tracer)) return TCL_OK;
+         if (delay_bind(varName, localName, "ecn_syn_wait_", &ecn_syn_wait_, tracer)) return TCL_OK;
+         if (delay_bind_bool(varName, localName, "debug_", &debug_, tracer)) return TCL_OK;
++		if (delay_bind(varName, localName, "serviceid_", &serviceid_, tracer)) return TCL_OK; // Wei
++		if (delay_bind(varName, localName, "bytes_", &bytes_, tracer)) return TCL_OK; // Wei
+ 
+         return TcpAgent::delay_bind_dispatch(varName, localName, tracer);
+ }
+@@ -839,7 +841,8 @@
+         if (!p) p = allocpkt();
+         hdr_tcp *tcph = hdr_tcp::access(p);
+ 	hdr_flags *fh = hdr_flags::access(p);
+-
++		hdr_ip* iph = hdr_ip::access(p);	//Wei
++		
+ 	/* build basic header w/options */
+ 
+         tcph->seqno() = seqno;
+@@ -871,6 +874,11 @@
+ 		/* Set ect() to 0.  -M. Weigle 1/19/05 */
+ 		fh->ect() = 0;
+ 	}
++
++	// For DCTCP, ect should be set on all packets
++	if (dctcp_)
++		fh->ect() = ect_;
++
+ 	if (ecn_ && ect_ && recent_ce_ ) { 
+ 		// This is needed here for the ACK in a SYN, SYN/ACK, ACK
+ 		// sequence.
+@@ -914,7 +922,12 @@
+ //printf("%f(%s)[state:%s]: sending pkt ", now(), name(), statestr(state_));
+ //prpkt(p);
+ //}
+-
++	//Use IP header priority to denote service id
++	iph->prio()=serviceid_;
++	
++	//Update bytes sent
++	//bytes_+=datalen;
++	
+ 	send(p, 0);
+ 
+ 	return;
+@@ -960,9 +973,12 @@
+ 	// Q: how can this happen?
+ 
+ 	if (maxseg_ == 0) 
+-	   	maxseg_ = size_ - headersize();
++	   	maxseg_ = size_; // Mohammad: changed from size_ - headersize();
++	/* Mohammad: This else condition is unnecessary and conflates 
++	 * with tcp.cc
+ 	else
+ 		size_ =  maxseg_ + headersize();
++	*/
+ 
+ 	int is_retransmit = (seqno < maxseq_);
+ 	int quiet = (highest_ack_ == maxseq_);
+@@ -1156,6 +1172,8 @@
+          */      
+ 	flags_ &= ~(TF_ACKNOW|TF_DELACK);
+ 
++	delack_timer_.force_cancel();
++
+ 	/*
+ 	 * if we have reacted to congestion recently, the
+ 	 * slowdown() procedure will have set cong_action_ and
+@@ -1178,6 +1196,8 @@
+ 	//	and adjusted for SYNs and FINs which use up one number
+ 
+ 	int highest = seqno + reliable;
++	if (highest > dctcp_maxseq) 
++		dctcp_maxseq = highest;
+ 	if (highest > maxseq_) {
+ 		maxseq_ = highest;
+ 		//
+@@ -1415,7 +1435,6 @@
+ {
+ 	// we are now going to fast-retransmit and willtrace that event
+ 	trace_event("FAST_RETX");
+-	
+ 	recover_ = maxseq_;	// recovery target
+ 	last_cwnd_action_ = CWND_ACTION_DUPACK;
+ 	return(foutput(seq, REASON_DUPACK));	// send one pkt
+@@ -1521,6 +1540,9 @@
+ 	int ackno = tcph->ackno();		 // ack # from packet
+ 	int tiflags = tcph->flags() ; 		 // tcp flags from packet
+ 
++	//Added by Wei Bai
++	bytes_+=datalen;
++	
+ //if (state_ != TCPS_ESTABLISHED || (tiflags&(TH_SYN|TH_FIN))) {
+ //fprintf(stdout, "%f(%s)in state %s recv'd this packet: ", now(), name(), statestr(state_));
+ //prpkt(pkt);
+@@ -1564,11 +1586,19 @@
+ 	 * at time t0 = (0.0 + k * interval_) for some k such
+ 	 * that t0 > now
+ 	 */
++	/* 
++	 * Mohammad: commented this out for more efficient 
++	 * delayed ack generation.
++	 *
+ 	if (delack_interval_ > 0.0 &&
+ 	    (delack_timer_.status() != TIMER_PENDING)) {
+ 		int last = int(now() / delack_interval_);
+ 		delack_timer_.resched(delack_interval_ * (last + 1.0) - now());
+ 	}
++	*/
++
++	if (dctcp_) 
++		update_dctcp_alpha(pkt);
+ 
+ 	/*
+ 	 * Try header prediction: in seq data or in seq pure ACK
+@@ -1597,6 +1627,25 @@
+ 		//
+ 
+ 	    	if (ecn_) {
++			if (dctcp_) { // DCTCP	       
++				if (fh->ce() && fh->ect()) {
++					// no CWR from peer yet... arrange to
++					// keep sending ECNECHO
++					if (recent_ce_ == FALSE) {
++						ce_transition = 1;
++						recent_ce_ = TRUE;
++					} else {
++						ce_transition = 0;
++					}
++				} else if (datalen > 0 && !fh->ce() && fh->ect()){
++					if (recent_ce_ == TRUE) {
++						ce_transition = 1;
++						recent_ce_ = FALSE;
++					} else {
++						ce_transition = 0;
++					}
++				}  
++			} else {
+ 	    		if (fh->ce() && fh->ect()) {
+ 	    			// no CWR from peer yet... arrange to
+ 	    			// keep sending ECNECHO
+@@ -1607,6 +1656,7 @@
+ 	    			recent_ce_ = FALSE;
+ 	    		}
+ 	    	}
++	    	}
+ 
+ 		// Header predication basically looks to see
+ 		// if the incoming packet is an expected pure ACK
+@@ -1638,8 +1688,21 @@
+ 			//	this routine scans all tcpcb's looking for
+ 			//	DELACK segments and when it finds them
+ 			//	changes DELACK to ACKNOW and calls tcp_output()
++			
++			/* DCTCP receiver state machine */
++		        if (dctcp_ && ce_transition && ((rcv_nxt_ - last_ack_sent_) > 0)) {
++				// Must send an immediate ACK with with previous ECN state 
++				// before transitioning to new state
++				flags_ |= TF_ACKNOW;
++				recent_ce_ = !recent_ce_;		
++				send_much(1, REASON_NORMAL, maxburst_);
++				recent_ce_ = !recent_ce_;			  
++			}
++			
+ 			rcv_nxt_ += datalen;
+ 			flags_ |= TF_DELACK;
++			// Mohammad
++			delack_timer_.resched(delack_interval_);
+ 			recvBytes(datalen); // notify application of "delivery"
+ 			//
+ 			// special code here to simulate the operation
+@@ -1816,6 +1879,8 @@
+ 			 */
+ 			if (datalen > 0) {
+ 				flags_ |= TF_DELACK;	// data there: wait
++				// Mohammad
++				delack_timer_.resched(delack_interval_);
+ 			} else {
+ 				flags_ |= TF_ACKNOW;	// ACK peer's SYN
+ 			}
+@@ -2131,10 +2196,31 @@
+                 // cong_action bit
+                 // 
+                 if (ecn_) {
+-                        if (fh->ce() && fh->ect())
++			if (dctcp_) { // Mohammad		       
++				if (fh->ce() && fh->ect()) {
++					// no CWR from peer yet... arrange to
++					// keep sending ECNECHO
++					if (recent_ce_ == FALSE) {
++						ce_transition = 1;
+                                 recent_ce_ = TRUE;
+-                        else if (fh->cwr()) 
++					} else {
++						ce_transition = 0;
++					}
++				} else if (datalen > 0 && !fh->ce() && fh->ect()){
++					if (recent_ce_ == TRUE) {
++						ce_transition = 1;
+                                 recent_ce_ = FALSE;
++					} else {
++						ce_transition = 0;
++					}
++				}		
++			} else {
++				if (fh->ce() && fh->ect()) {
++					recent_ce_ = TRUE;
++				} else if (fh->cwr()) { 
++					recent_ce_ = FALSE;
++				}		    
++			}
+                 }
+ 
+ 		//
+@@ -2297,11 +2383,19 @@
+ 		if ((!delay_growth_ || (rcv_nxt_ > 0)) &&
+ 		    last_state_ == TCPS_ESTABLISHED) {
+ 			if (!partial || open_cwnd_on_pack_) {
+-                           if (!ect_ || !hdr_flags::access(pkt)->ecnecho())
++                           if (!ect_ || !hdr_flags::access(pkt)->ecnecho() || ecn_burst_)
+ 				opencwnd();
+                         }
+ 		}
+ 
++		// Mohammad: Detect bursts of ECN marks
++		if (ect_) {
++			if (!ecn_burst_ && hdr_flags::access(pkt)->ecnecho())
++				ecn_burst_ = TRUE;
++			else if (ecn_burst_ && ! hdr_flags::access(pkt)->ecnecho())
++				ecn_burst_ = FALSE;
++		}
++		
+ 		if ((state_ >= TCPS_FIN_WAIT_1) && (ackno == maxseq_)) {
+ 			ourfinisacked = TRUE;
+ 		}
+@@ -2395,7 +2489,21 @@
+ 			// don't really have a process anyhow, just
+ 			// accept the data here as-is (i.e. don't
+ 			// require being in ESTABLISHED state)
++			
++			/* Mohammad: For DCTCP state machine */
++		        if (dctcp_ && ce_transition && ((rcv_nxt_ - last_ack_sent_) > 0)) {
++				// Must send an immediate ACK with with previous ECN state 
++				// before transitioning to new state
++				flags_ |= TF_ACKNOW;
++				recent_ce_ = !recent_ce_;
++				send_much(1, REASON_NORMAL, maxburst_);
++				recent_ce_ = !recent_ce_;			  
++                        }
++			
+ 			flags_ |= TF_DELACK;
++			// Mohammad
++			delack_timer_.resched(delack_interval_);
++
+ 			rcv_nxt_ += datalen;
+ 			tiflags = tcph->flags() & TH_FIN;
+ 
+@@ -2412,6 +2520,10 @@
+ 			// segments or hole-fills.  Also,
+ 			// send an ACK (or SACK) to the other side right now.
+ 			// Note that we may have just a FIN here (datalen = 0)
++
++			/* Note: The DCTCP receiver conveys the ECN-CE 
++			   received on each out-of-order data packet */
++
+ 			int rcv_nxt_old_ = rcv_nxt_; // notify app. if changes
+ 			tiflags = reass(pkt);
+ 			if (rcv_nxt_ > rcv_nxt_old_) {
+@@ -2608,9 +2720,47 @@
+ 	}
+ 	reset_rtx_timer(1);
+ 	t_seqno_ = (highest_ack_ < 0) ? iss_ : int(highest_ack_);
++	dctcp_alpha_update_seq = t_seqno_;
++	dctcp_maxseq = dctcp_alpha_update_seq;
+ 	fastrecov_ = FALSE;
+ 	dupacks_ = 0;
+ }
++
++/*
++ * Update dctcp alpha based on the ecn bit in the received packet.
++ * This procedure is called only when dctcp_ is 1.
++ */
++void FullTcpAgent::update_dctcp_alpha(Packet *pkt)
++{
++	int ecnbit = hdr_flags::access(pkt)->ecnecho();
++	int ackno = hdr_tcp::access(pkt)->ackno();
++	int acked_bytes = ackno - highest_ack_; 
++
++	if (acked_bytes <= 0) 
++		acked_bytes = size_;	
++	dctcp_total += acked_bytes;
++	if (ecnbit) {
++		dctcp_marked += acked_bytes;
++	}
++
++	/* Check for barrier indicating its time to recalculate alpha.
++	 * This code basically updated alpha roughly once per RTT.
++	 */
++	if (ackno > dctcp_alpha_update_seq) {
++		double temp_alpha;
++		dctcp_alpha_update_seq = dctcp_maxseq;
++		if (dctcp_total > 0) 
++			temp_alpha = ((double) dctcp_marked) / dctcp_total;
++		else 
++			temp_alpha = 0.0;
++
++		dctcp_alpha_ = (1 - dctcp_g_) * dctcp_alpha_ + dctcp_g_ * temp_alpha;
++		dctcp_marked = 0;
++		dctcp_total = 0;
++	}
++}
++
++
+ /*
+  * deal with timers going off.
+  * 2 types for now:
+@@ -2662,7 +2812,8 @@
+                         flags_ |= TF_ACKNOW;
+                         send_much(1, REASON_NORMAL, 0);
+                 }
+-                delack_timer_.resched(delack_interval_);
++		// Mohammad
++                // delack_timer_.resched(delack_interval_);
+ 		break;
+ 	default:
+ 		fprintf(stderr, "%f: FullTcpAgent(%s) Unknown Timeout type %d\n",
+@@ -2874,6 +3025,9 @@
+ 		 * packet.   -M. Weigle  6/19/02
+ 		 */
+ 		last_cwnd_action_ = CWND_ACTION_DUPACK;
++		/* Mohammad: cut window by half when we have 3 dup ack */
++		if (dctcp_) 
++			slowdown(CLOSE_SSTHRESH_HALF|CLOSE_CWND_HALF); 
+ 		cancel_rtx_timer();
+ 		rtt_active_ = FALSE;
+ 		int amt = fast_retransmit(highest_ack_);
+diff -Naur --no-dereference ns-allinone-2.35-raw/ns-2.35/tcp/tcp-full.h ns-allinone-2.35/ns-2.35/tcp/tcp-full.h
+--- ns-allinone-2.35-raw/ns-2.35/tcp/tcp-full.h	2008-10-15 01:42:52.000000000 +0800
++++ ns-allinone-2.35/ns-2.35/tcp/tcp-full.h	2015-04-05 01:07:09.000000000 +0800
+@@ -120,7 +120,11 @@
+         	last_send_time_(-1.0), infinite_send_(FALSE), irs_(-1),
+         	delack_timer_(this), flags_(0),
+         	state_(TCPS_CLOSED), recent_ce_(FALSE),
+-        	last_state_(TCPS_CLOSED), rq_(rcv_nxt_), last_ack_sent_(-1) { }
++        	last_state_(TCPS_CLOSED), rq_(rcv_nxt_), last_ack_sent_(-1),
++	        dctcp_total(0), dctcp_marked(0), dctcp_alpha_update_seq(0), 
++	        dctcp_maxseq(0), ce_transition(0),
++			bytes_(0),serviceid_(0)//Added by Wei Bai
++			{ }
+ 
+ 	~FullTcpAgent() { cancel_timers(); rq_.clear(); }
+ 	virtual void recv(Packet *pkt, Handler*);
+@@ -135,6 +139,9 @@
+ protected:
+ 	virtual void delay_bind_init_all();
+ 	virtual int delay_bind_dispatch(const char *varName, const char *localName, TclObject *tracer);
++	
++	int bytes_;	//Wei: bytes received
++	int serviceid_;	//Wei: service id
+ 	int closed_;
+ 	int ts_option_size_;	// header bytes in a ts option
+ 	int pipe_;		// estimate of pipe occupancy (for Sack)
+@@ -183,6 +190,8 @@
+ 	void finish();
+ 	void reset_rtx_timer(int);  	// adjust the rtx timer
+ 
++	void update_dctcp_alpha(Packet*); // DCTCP alpha update
++
+ 	virtual void timeout_action();	// what to do on rtx timeout
+ 	virtual void dupack_action();	// what to do on dup acks
+ 	virtual void pack_action(Packet*);	// action on partial acks
+@@ -236,6 +245,16 @@
+ 	int last_state_; /* FSM state at last pkt recv */
+ 	int rcv_nxt_;       /* next sequence number expected */
+ 	ReassemblyQueue rq_;    /* TCP reassembly queue */
++	
++	/*
++	 * variables for DCTCP
++	 */
++	int dctcp_total;
++	int dctcp_marked;
++	int dctcp_alpha_update_seq;
++	int dctcp_maxseq;
++	int ce_transition;
++
+ 	/*
+ 	* the following are part of a tcpcb in "real" RFC1323 TCP
+ 	*/
+diff -Naur --no-dereference ns-allinone-2.35-raw/ns-2.35/tcp/tcp.h ns-allinone-2.35/ns-2.35/tcp/tcp.h
+--- ns-allinone-2.35-raw/ns-2.35/tcp/tcp.h	2011-08-27 03:29:57.000000000 +0800
++++ ns-allinone-2.35/ns-2.35/tcp/tcp.h	2016-02-14 21:13:54.716568758 +0800
+@@ -104,7 +104,8 @@
+ #define CWND_HALF_WITH_MIN	0x00000200
+ #define TCP_IDLE		0x00000400
+ #define NO_OUTSTANDING_DATA     0x00000800
+-
++#define CLOSE_SSTHRESH_DCTCP   0x00001000
++#define CLOSE_CWND_DCTCP       0x00002000
+ /*
+  * tcp_tick_:
+  * default 0.1,
+@@ -432,6 +433,12 @@
+ 
+ 	/* Used for ECN */
+ 	int ecn_;		/* Explicit Congestion Notification */
++	
++	/* Use for DCTCP */
++	int dctcp_;
++	double dctcp_alpha_;
++	double dctcp_g_;
++
+ 	int cong_action_;	/* Congestion Action.  True to indicate
+ 				   that the sender responded to congestion. */
+         int ecn_burst_;		/* True when the previous ACK packet
