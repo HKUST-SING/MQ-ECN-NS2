@@ -27,15 +27,15 @@ enableMultiPath = 1
 perflowMP = 1	#Per-flow load balancing (ECMP)
 
 init_window = 16	#TCP initial window
-sourceAlg = 'Sack'	#DCTCP-Sack or Sack
+sourceAlg = 'DCTCP-Sack'	#DCTCP-Sack (DCTCP) or Sack (ECN*)
 ackRatio = 1
 slowstartrestart = 'true'
-DCTCP_g = 0.0625
+DCTCP_g = 0.0625	#g for DCTCP
 min_rto = 0.005	#TCP RTOmin
 
 #per-queue-standard(0), per-port(1), MQ-ECN(2) and per-queue-min(3)
 ECN_scheme_arr = [0, 2, 3]	#ECN marking schemes
-DCTCP_K = 84.0	#Standard marking threshold
+DCTCP_K = 65.0	#Standard marking threshold in packets
 switchAlgs = ['DWRR','WRR']	#Scheduling algorithms
 
 topology_spt = 12	#Number of servers under a ToR switch
@@ -61,7 +61,7 @@ for switchAlg in switchAlgs:
 					transport = 'dctcp'
 
 				#Directory name: workload_transport_scheme_[ECN_scheme]_load_[load]_service_[service_num]
-				directory_name = 'diffserv_'+specialStr+switchAlg+'_'+transport+'_scheme_'+str(ECN_scheme)+'_load_'+str(int(load*10))+'_service_'+str(service_num)
+				directory_name = 'diffserv_'+specialStr+switchAlg+'_'+transport+'_scheme_'+str(ECN_scheme)+'_load_'+str(int(load*100))+'_service_'+str(service_num)
 				directory_name = directory_name.lower()
 				#Simulation command
 				cmd = ns_path+' '+sim_script+' '\
