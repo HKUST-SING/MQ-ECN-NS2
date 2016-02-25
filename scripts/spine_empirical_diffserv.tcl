@@ -136,12 +136,12 @@ if {$ECN_scheme != 3} {
 
 ############## Multipathing ###########################
 if {$enableMultiPath == 1} {
-    $ns rtproto DV
-    Agent/rtProto/DV set advertInterval	[expr 2 * $sim_end]
-    Node set multiPath_ 1
-    if {$perflowMP != 0} {
-        Classifier/MultiPath set perflow_ 1
-    }
+	$ns rtproto DV
+	Agent/rtProto/DV set advertInterval	[expr 2 * $sim_end]
+	Node set multiPath_ 1
+	if {$perflowMP != 0} {
+		Classifier/MultiPath set perflow_ 1
+	}
 }
 
 ############# Topoplgy #########################
@@ -151,27 +151,28 @@ puts "Total server number: $S"
 puts "Uplink capacity: $UCap Gbps"
 
 for {set i 0} {$i < $S} {incr i} {
-    set s($i) [$ns node]
+	set s($i) [$ns node]
 }
 
 for {set i 0} {$i < $topology_tors} {incr i} {
-    set n($i) [$ns node]
+	set n($i) [$ns node]
 }
 
 for {set i 0} {$i < $topology_spines} {incr i} {
-    set a($i) [$ns node]
+	set a($i) [$ns node]
 }
 
 for {set i 0} {$i < $S} {incr i} {
-    set j [expr $i / $topology_spt]
-    $ns duplex-link $s($i) $n($j) [set link_rate]Gb [expr $host_delay + $mean_link_delay]  $switchAlg
+	set j [expr $i / $topology_spt]
+	$ns duplex-link $s($i) $n($j) [set link_rate]Gb [expr $host_delay + $mean_link_delay]  $switchAlg
 
 ##### Configure DWRR/WRR for edge links #####
 	set L [$ns link $s($i) $n($j)]
 	set q [$L set queue_]
 
 	for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-        if {[string compare $switchAlg "DWRR"] == 0} {
+
+		if {[string compare $switchAlg "DWRR"] == 0} {
 			$q set-quantum $service_i $dwrr_quantum
 		} elseif {[string compare $switchAlg "WRR"] == 0} {
 			$q set-quantum $service_i $wrr_quantum
@@ -188,8 +189,8 @@ for {set i 0} {$i < $S} {incr i} {
 	set L [$ns link $n($j) $s($i)]
 	set q [$L set queue_]
 
-    for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-        if {[string compare $switchAlg "DWRR"] == 0} {
+	for {set service_i 0} {$service_i < $service_num} {incr service_i} {
+		if {[string compare $switchAlg "DWRR"] == 0} {
 			$q set-quantum $service_i $dwrr_quantum
 		} elseif {[string compare $switchAlg "WRR"] == 0} {
 			$q set-quantum $service_i $wrr_quantum
@@ -205,7 +206,7 @@ for {set i 0} {$i < $S} {incr i} {
 }
 
 for {set i 0} {$i < $topology_tors} {incr i} {
-    for {set j 0} {$j < $topology_spines} {incr j} {
+	for {set j 0} {$j < $topology_spines} {incr j} {
 		$ns duplex-link $n($i) $a($j) [set UCap]Gb $mean_link_delay $switchAlg
 
 ##### Configure DWRR/WRR for core links #####
@@ -213,39 +214,39 @@ for {set i 0} {$i < $topology_tors} {incr i} {
 		set q [$L set queue_]
 		$q set link_capacity_ $UCap$link_capacity_unit
 
-        for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-            if {[string compare $switchAlg "DWRR"] == 0} {
-    			$q set-quantum $service_i $dwrr_quantum
-    		} elseif {[string compare $switchAlg "WRR"] == 0} {
-    			$q set-quantum $service_i $wrr_quantum
-    		}
+		for {set service_i 0} {$service_i < $service_num} {incr service_i} {
+			if {[string compare $switchAlg "DWRR"] == 0} {
+				$q set-quantum $service_i $dwrr_quantum
+			} elseif {[string compare $switchAlg "WRR"] == 0} {
+				$q set-quantum $service_i $wrr_quantum
+			}
 
-    		#per-queue min (3)
-    		if {$ECN_scheme == 3} {
-    			$q set-thresh $service_i [expr $DCTCP_K / $service_num]
-    		} else {
-    			$q set-thresh $service_i [expr $DCTCP_K]
-    		}
-    	}
+			#per-queue min (3)
+			if {$ECN_scheme == 3} {
+				$q set-thresh $service_i [expr $DCTCP_K / $service_num]
+			} else {
+				$q set-thresh $service_i [expr $DCTCP_K]
+			}
+		}
 
 		set L [$ns link $a($j) $n($i)]
 		set q [$L set queue_]
 		$q set link_capacity_ $UCap$link_capacity_unit
 
-        for {set service_i 0} {$service_i < $service_num} {incr service_i} {
-            if {[string compare $switchAlg "DWRR"] == 0} {
-    			$q set-quantum $service_i $dwrr_quantum
-    		} elseif {[string compare $switchAlg "WRR"] == 0} {
-    			$q set-quantum $service_i $wrr_quantum
-    		}
+		for {set service_i 0} {$service_i < $service_num} {incr service_i} {
+			if {[string compare $switchAlg "DWRR"] == 0} {
+				$q set-quantum $service_i $dwrr_quantum
+			} elseif {[string compare $switchAlg "WRR"] == 0} {
+				$q set-quantum $service_i $wrr_quantum
+			}
 
-    		#per-queue min (3)
-    		if {$ECN_scheme == 3} {
-    			$q set-thresh $service_i [expr $DCTCP_K / $service_num]
-    		} else {
-    			$q set-thresh $service_i [expr $DCTCP_K]
-    		}
-    	}
+			#per-queue min (3)
+			if {$ECN_scheme == 3} {
+				$q set-thresh $service_i [expr $DCTCP_K / $service_num]
+			} else {
+				$q set-thresh $service_i [expr $DCTCP_K]
+			}
+		}
 	}
 }
 
@@ -265,37 +266,37 @@ set flowlog [open $fct_log w]
 set init_fid 0
 
 for {set j 0} {$j < $S } {incr j} {
-    for {set i 0} {$i < $S } {incr i} {
+	for {set i 0} {$i < $S } {incr i} {
 		if {$i != $j} {
-            set agtagr($i,$j) [new Agent_Aggr_pair]
+			set agtagr($i,$j) [new Agent_Aggr_pair]
 
-            #Assign service ID
-            set service_id [expr {(($j + 1) * $S + ($i + 1)) % $service_num}]
-            $agtagr($i,$j) setup $s($i) $s($j) "$i $j" $connections_per_pair $init_fid  $service_id "TCP_pair"
-            $agtagr($i,$j) attach-logfile $flowlog
+			#Assign service ID
+			set service_id [expr {(($j + 1) * $S + ($i + 1)) % $service_num}]
+			$agtagr($i,$j) setup $s($i) $s($j) "$i $j" $connections_per_pair $init_fid  $service_id "TCP_pair"
+			$agtagr($i,$j) attach-logfile $flowlog
 
-            #Assign flow size distribution
-            set flow_cdf "CDF_vl2.tcl"
-            set meanFlowSize 7495019
-            set dist "vl2"
+			#Assign flow size distribution
+			set flow_cdf "CDF_vl2.tcl"
+			set meanFlowSize 7495019
+			set dist "vl2"
 
-            #Currently, we have 4 flow size distributions in total
-            if {$service_id % 4 == 0} {
-                set flow_cdf "CDF_cache.tcl"
-                set meanFlowSize 913703
-                set dist "cache"
-            } elseif {$service_id % 4 == 1} {
-                set flow_cdf "CDF_dctcp.tcl"
-                set meanFlowSize 1671357
-                set dist "dctcp"
-            } elseif {$service_id % 4 == 2} {
-                set flow_cdf "CDF_hadoop.tcl"
-                set meanFlowSize 4149016
-                set dist "hadoop"
-            }
+			#Currently, we have 4 flow size distributions in total
+			if {$service_id % 4 == 0} {
+				set flow_cdf "CDF_cache.tcl"
+				set meanFlowSize 913703
+				set dist "cache"
+			} elseif {$service_id % 4 == 1} {
+				set flow_cdf "CDF_dctcp.tcl"
+				set meanFlowSize 1671357
+				set dist "dctcp"
+			} elseif {$service_id % 4 == 2} {
+				set flow_cdf "CDF_hadoop.tcl"
+				set meanFlowSize 4149016
+				set dist "hadoop"
+			}
 
-            set lambda [expr ($link_rate * $load * 1000000000) / ($meanFlowSize * 8.0)]
-            puts -nonewline "($i,$j) service $service_id $dist "
+			set lambda [expr ($link_rate * $load * 1000000000) / ($meanFlowSize * 8.0)]
+			puts -nonewline "($i,$j) service $service_id $dist "
 
 			#For Poisson
 			$agtagr($i,$j) set_PCarrival_process  [expr $lambda/($S - 1)] $flow_cdf [expr 17 * $i + 1244 * $j] [expr 33 * $i + 4369 * $j]
