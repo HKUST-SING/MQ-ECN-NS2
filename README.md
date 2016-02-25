@@ -76,7 +76,7 @@ $ python result.py -a -i [directory_path]/flow.tr
 
 
 ## Acknowledgements
-We thank [Mohammad Alizadeh](https://people.csail.mit.edu/alizadeh/) for sharing pFabric simulation codes and DCTCP patch.  
+We thank [Mohammad Alizadeh](https://people.csail.mit.edu/alizadeh/) for sharing pFabric simulation code and DCTCP patch.  
 
 
 
