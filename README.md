@@ -58,7 +58,7 @@ Hence, to run simulations in parallel:
 python run_simulation_diffserv.py
 ```
 
-There are many parameters (e.g., transport protocol, the number of queues, etc) to configue in [run_simulation_diffserv.py](https://github.com/HKUST-SING/MQ-ECN-NS2/blob/master/scripts/run_simulation_diffserv.py). By default, it runs 20x simulations in parallel and iterates over the per-queue ECN with the standard threshold, per-queue ECN with the minimum threshold and MQ-ECN. For each simulation, it will create a directory with the following name:
+There are many parameters to configue in [run_simulation_diffserv.py](https://github.com/HKUST-SING/MQ-ECN-NS2/blob/master/scripts/run_simulation_diffserv.py). Note that you need to modify ```ns_path``` and ```sim_script ``` correspondingly. By default, it runs 20x simulations in parallel and iterates over the per-queue ECN with the standard threshold, per-queue ECN with the minimum threshold and MQ-ECN. For each simulation, it will create a directory with the following name:
 ```
 diffserv_[scheduler]_[transport]_scheme_[ECN scheme]_load_[network load]_service_[number of queues]
 ```
