@@ -1,14 +1,13 @@
 # MQ-ECN NS2 Simulation
-
 ## Software requirements
 To reproduce simulation results (Figure 9-13) of [MQ-ECN paper](http://www.cse.ust.hk/~kaichen/papers/mqecn-nsdi16.pdf), you need following softwares:
-  - [NS2 Network Simulator 2.35](https://sourceforge.net/projects/nsnam/)
-  - [mqecn.patch](https://github.com/HKUST-SING/MQ-ECN-NS2/blob/master/mqecn.patch) (include DCTCP and ECMP support) 
+  - [Network Simulator (NS) 2.35](https://sourceforge.net/projects/nsnam/)
+  - [mqecn.patch](https://github.com/HKUST-SING/MQ-ECN-NS2/blob/master/mqecn.patch) (Modify TCP & Add ECMP) 
   - [MQ-ECN code](https://github.com/HKUST-SING/MQ-ECN-NS2/tree/master/queue) (implement DWRR and WRR with different ECN marking schemes)
   - [Simulation scripts](https://github.com/HKUST-SING/MQ-ECN-NS2/tree/master/scripts) (run simulations in parallel and parse results)
 
 ## Installation
-Download [NS2 Network Simulator 2.35](https://sourceforge.net/projects/nsnam/) and unzip it.
+Download [Network Simulator (NS) 2.35](https://sourceforge.net/projects/nsnam/) and unzip it.
 ```
 $ tar -zxvf ns-allinone-2.35.tar.gz
 ```
@@ -44,7 +43,7 @@ Before running large-scale simulations, you can run several small-scale simulati
   Time, Queue Length of Switch Port
   ```
   
-## Running Large-scale Simulations
+## Running Large-Scale Simulations
 At the beginning, we briefly introduce the usage of each file in [scripts](https://github.com/HKUST-SING/MQ-ECN-NS2/tree/master/scripts) directory.
 - [CDF_cache.tcl](https://github.com/HKUST-SING/MQ-ECN-NS2/blob/master/scripts/CDF_cache.tcl), [CDF_dctcp.tcl](https://github.com/HKUST-SING/MQ-ECN-NS2/blob/master/scripts/CDF_dctcp.tcl), [CDF_hadoop.tcl](https://github.com/HKUST-SING/MQ-ECN-NS2/blob/master/scripts/CDF_hadoop.tcl) and [CDF_vl2.tcl](https://github.com/HKUST-SING/MQ-ECN-NS2/blob/master/scripts/CDF_vl2.tcl) give flow size distributions used in our paper.
 
@@ -59,7 +58,7 @@ Hence, to run simulations in parallel:
 python run_simulation_diffserv.py
 ```
 
-There are many parameters (e.g., transport protocol, the number of queues, etc) to configue in [run_simulation_diffserv.py](https://github.com/HKUST-SING/MQ-ECN-NS2/blob/master/scripts/run_simulation_diffserv.py). By default, it runs 20x simulations in parallel and iterates over the per-queue ECN with the standard threshold, per-queue ECN with the minimum threshold and MQ-ECN. For each simulation, it will create a directory with the following format:
+There are many parameters (e.g., transport protocol, the number of queues, etc) to configue in [run_simulation_diffserv.py](https://github.com/HKUST-SING/MQ-ECN-NS2/blob/master/scripts/run_simulation_diffserv.py). By default, it runs 20x simulations in parallel and iterates over the per-queue ECN with the standard threshold, per-queue ECN with the minimum threshold and MQ-ECN. For each simulation, it will create a directory with the following name:
 ```
 diffserv_[scheduler]_[transport]_scheme_[ECN scheme]_load_[network load]_service_[number of queues]
 ```
@@ -74,6 +73,8 @@ You can use [result.py](https://github.com/HKUST-SING/MQ-ECN-NS2/blob/master/scr
 $ python result.py -a -i [directory_path]/flow.tr
 ```
 
+## Contact
+If you have any question about MQ-ECN simulation code, please contact [Wei Bai](http://sing.cse.ust.hk/~wei/).
 
 ## Acknowledgements
 We thank [Mohammad Alizadeh](https://people.csail.mit.edu/alizadeh/) for sharing pFabric simulation code and DCTCP patch.  
